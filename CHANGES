@@ -362,6 +362,20 @@
 4225.	[port]		freebsd/openbsd:  Use '${CC} -shared' for building
 			shared libraries. [RT #39557]
 
+4224.	[func]		Added support for "dyndb", a new interface for loading
+			zone data from an external database, developed by
+			Red Hat for the FreeIPA project.
+
+			DynDB drivers fully implement the BIND database
+			API, and are capable of significantly better
+			performance and functionality than DLZ drivers,
+			while taking advantage of advanced database
+			features not available in BIND such as multi-master
+			replication.
+
+			Thanks to Adam Tkac and Petr Spacek of Red Hat.
+			[RT #35271]
+
 4221.	[bug]		Resource leak on DNS_R_NXDOMAIN in fctx_create.
 			[RT #40583]
 

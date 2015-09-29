@@ -2372,6 +2372,8 @@ options {
 
     <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="dlz.xml"/>
 
+    <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="dyndb.xml"/>
+
     <section xml:id="ipv6"><info><title>IPv6 Support in <acronym>BIND</acronym> 9</title></info>
       <para>
 	<acronym>BIND</acronym> 9 fully supports all currently
