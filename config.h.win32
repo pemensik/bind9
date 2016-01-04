@@ -382,6 +382,9 @@ typedef __int64 off_t;
 /* Build with GeoIP Country IPv6 support */
 @HAVE_GEOIP_V6@
 
+/* Define if zlib was found */
+@HAVE_ZLIB@
+
 /* Define to enable rpz-nsdname rules. */
 @ENABLE_RPZ_NSDNAME@
 

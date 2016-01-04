@@ -178,11 +178,19 @@ SOURCE=..\include\dns\dnssec.h
 # End Source File
 # Begin Source File
 
+SOURCE=..\include\dns\dnstap.h
+# End Source File
+# Begin Source File
+
 SOURCE=..\include\dns\ds.h
 # End Source File
 # Begin Source File
 
 SOURCE=..\include\dns\ecdb.h
+# End Source File
+# Begin Source File
+
+SOURCE=..\include\dns\edns.h
 # End Source File
 # Begin Source File
 

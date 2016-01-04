@@ -242,6 +242,7 @@
     <ClInclude Include="..\include\dns\dlz.h" />
     <ClInclude Include="..\include\dns\dns64.h" />
     <ClInclude Include="..\include\dns\dnssec.h" />
+    <ClInclude Include="..\include\dns\dnstap.h" />
     <ClInclude Include="..\include\dns\ds.h" />
     <ClInclude Include="..\include\dns\dsdigest.h" />
     <ClInclude Include="..\include\dns\ecdb.h" />
