@@ -419,6 +419,26 @@ fnv_initialize(void) {
 	}
 }
 
+const void *
+isc_hash_get_initializer(void) {
+	RUNTIME_CHECK(isc_once_do(&fnv_once, fnv_initialize) == ISC_R_SUCCESS);
+
+	return (&fnv_offset_basis);
+}
+
+void
+isc_hash_set_initializer(const void *initializer) {
+	REQUIRE(initializer != NULL);
+
+	/*
+	 * Ensure that fnv_initialize() is not called after
+	 * isc_hash_set_initializer() is called.
+	 */
+	RUNTIME_CHECK(isc_once_do(&fnv_once, fnv_initialize) == ISC_R_SUCCESS);
+
+	fnv_offset_basis = *((const unsigned int *) initializer);
+}
+
 isc_uint32_t
 isc_hash_function(const void *data, size_t length,
 		  isc_boolean_t case_sensitive,
@@ -443,7 +463,7 @@ isc_hash_function(const void *data, size_t length,
 	/*
 	 * Fowler-Noll-Vo FNV-1a hash function.
 	 *
-	 * NOTE: A random fnv_offset_basis is used by default to avoid
+	 * NOTE: A random FNV offset basis is used by default to avoid
 	 * collision attacks as the hash function is reversible. This
 	 * makes the mapping non-deterministic, but the distribution in
 	 * the domain is still uniform.
@@ -498,7 +518,7 @@ isc_hash_function_reverse(const void *data, size_t length,
 	INSIST(data == NULL || length > 0);
 	RUNTIME_CHECK(isc_once_do(&fnv_once, fnv_initialize) == ISC_R_SUCCESS);
 
-	hval = ISC_UNLIKELY(previous_hashp != NULL) ?
+	hval = previous_hashp != NULL ?
 		*previous_hashp : fnv_offset_basis;
 
 	if (length == 0)
@@ -510,7 +530,7 @@ isc_hash_function_reverse(const void *data, size_t length,
 	/*
 	 * Fowler-Noll-Vo FNV-1a hash function.
 	 *
-	 * NOTE: A random fnv_offset_basis is used by default to avoid
+	 * NOTE: A random FNV offset basis is used by default to avoid
 	 * collision attacks as the hash function is reversible. This
 	 * makes the mapping non-deterministic, but the distribution in
 	 * the domain is still uniform.
