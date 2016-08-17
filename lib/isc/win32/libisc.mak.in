@@ -866,6 +866,23 @@ SOURCE=.\entropy.c
 
 !ENDIF 
 
+SOURCE=.\errno.c
+
+!IF  "$(CFG)" == "libisc - @PLATFORM@ Release"
+
+
+"$(INTDIR)\errno.obj" : $(SOURCE) "$(INTDIR)"
+
+
+!ELSEIF  "$(CFG)" == "libisc - @PLATFORM@ Debug"
+
+
+"$(INTDIR)\errno.obj"	"$(INTDIR)\errno.sbr" : $(SOURCE) "$(INTDIR)"
+
+
+!ENDIF
+
+
 SOURCE=.\errno2result.c
 
 !IF  "$(CFG)" == "libisc - @PLATFORM@ Release"
