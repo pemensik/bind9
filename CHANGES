@@ -11,6 +11,10 @@
 			interoperation with ECS clients have been
 			included in this security release.  The full
 			fix is included in BIND 9.10.5.
+4455.	[cleanup]	Allow dyndb modules to correctly log the filename
+			and line number when processing configuration text
+			from named.conf. [RT #43050]
+
 4444.	[bug]		Fixed some issues related to dyndb: A bug caused
 			braces to be omitted when passing configuration text
 			from named.conf to a dyndb driver, and there was a
