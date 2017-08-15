@@ -145,10 +145,7 @@ static char servercookie[256];
 
 #ifdef WITH_IDN_SUPPORT
 static void idn_initialize(void);
-static isc_result_t idn_locale_to_utf8(const char *from,
-		char *to,
-		size_t tolen);
-static isc_result_t idn_utf8_to_ace(const char *from,
+static isc_result_t idn_locale_to_ace(const char *from,
 		char *to,
 		size_t tolen);
 static isc_result_t idn_ace_to_locale(const char *from,
@@ -157,18 +154,12 @@ static isc_result_t idn_ace_to_locale(const char *from,
 static isc_result_t output_filter(isc_buffer_t *buffer,
 		unsigned int used_org,
 		isc_boolean_t absolute);
-static isc_result_t append_textname(char *name,
-		const char *origin,
-		size_t namesize);
 
 #define MAXDLEN 256
 
 #ifdef WITH_IDNKIT
 static isc_result_t idnkit_initialize(void);
-static isc_result_t idnkit_locale_to_utf8(const char *from,
-		char *to,
-		size_t tolen);
-static isc_result_t idnkit_utf8_to_ace(const char *from,
+static isc_result_t idnkit_locale_to_ace(const char *from,
 		char *to,
 		size_t tolen);
 static isc_result_t idnkit_ace_to_locale(const char *from,
@@ -176,10 +167,7 @@ static isc_result_t idnkit_ace_to_locale(const char *from,
 		size_t tolen);
 
 #elif WITH_LIBIDN
-static isc_result_t libidn_locale_to_utf8(const char *from,
-		char *to,
-		size_t tolen);
-static isc_result_t libidn_utf8_to_ace(const char *from,
+static isc_result_t libidn_locale_to_ace(const char *from,
 		char *to,
 		size_t tolen);
 static isc_result_t libidn_ace_to_locale(const char *from,
@@ -191,6 +179,9 @@ static isc_result_t libidn2_locale_to_utf8(const char *from,
 		char *to,
 		size_t tolen);
 static isc_result_t libidn2_utf8_to_ace(const char *from,
+		char *to,
+		size_t tolen);
+static isc_result_t libidn2_locale_to_ace(const char *from,
 		char *to,
 		size_t tolen);
 static isc_result_t libidn2_ace_to_locale(const char *from,
@@ -698,7 +689,7 @@ make_empty_lookup(void) {
 	looknew->ttlunits = ISC_FALSE;
 	looknew->ttlunits = ISC_FALSE;
 	looknew->qr = ISC_FALSE;
-#ifdef WITH_IDN
+#ifdef WITH_IDN_SUPPORT
 	looknew->idnout = ISC_TRUE;
 #else
 	looknew->idnout = ISC_FALSE;
@@ -2079,7 +2070,10 @@ setup_lookup(dig_lookup_t *lookup) {
 	char ecsbuf[20];
 	char cookiebuf[256];
 #ifdef WITH_IDN_SUPPORT
-	char utf8_textname[MXNAME], utf8_origin[MXNAME], idn_textname[MXNAME];
+	char origin[MXNAME], textname[MXNAME];
+#else
+	const char *origin = NULL;
+	const char *textname = NULL;
 #endif
 
 #ifdef WITH_IDN_SUPPORT
@@ -2121,9 +2115,12 @@ setup_lookup(dig_lookup_t *lookup) {
 	 * TLD.
 	 */
 #ifdef WITH_IDN_SUPPORT
-	result = idn_locale_to_utf8(lookup->textname, utf8_textname,
-				    sizeof(utf8_textname));
-	check_result(result, "convert textname to UTF-8");
+	result = idn_locale_to_ace(lookup->textname, textname,
+				    sizeof(textname));
+	check_result(result, "convert textname to IDN encoding");
+	debug("textname: %s", textname);
+#else
+	textname = lookup->textname;
 #endif
 
 	/*
@@ -2134,11 +2131,7 @@ setup_lookup(dig_lookup_t *lookup) {
 	 * is TRUE or we got a domain line in the resolv.conf file.
 	 */
 	if (lookup->new_search) {
-#ifdef WITH_IDN_SUPPORT
-		if ((count_dots(utf8_textname) >= ndots) || !usesearch)
-#else
-		if ((count_dots(lookup->textname) >= ndots) || !usesearch)
-#endif
+		if ((count_dots(textname) >= ndots) || !usesearch)
 		{
 			lookup->origin = NULL; /* Force abs lookup */
 			lookup->done_as_is = ISC_TRUE;
@@ -2149,26 +2142,6 @@ setup_lookup(dig_lookup_t *lookup) {
 		}
 	}
 
-#ifdef WITH_IDN_SUPPORT
-	if (lookup->origin != NULL) {
-		debug("trying origin %s", lookup->origin->origin);
-		result = idn_locale_to_utf8(lookup->origin->origin,
-					    utf8_origin, sizeof(utf8_origin));
-		check_result(result, "convert origin to UTF-8");
-		result = append_textname(utf8_textname,
-					 utf8_origin, sizeof(utf8_textname));
-		check_result(result, "append origin to textname");
-	}
-	result = idn_utf8_to_ace(utf8_textname,
-				 idn_textname, sizeof(idn_textname));
-	if (lookup->origin != NULL && result == ISC_R_NOSPACE) {
-		dns_message_puttempname(lookup->sendmsg,
-					&lookup->name);
-		return ISC_FALSE;
-	}
-	check_result(result, "convert UTF-8 textname to IDN encoding");
-
-#else /* WITH_IDN_SUPPORT */
 	if (lookup->origin != NULL) {
 		debug("trying origin %s", lookup->origin->origin);
 		result = dns_message_gettempname(lookup->sendmsg,
@@ -2176,8 +2149,16 @@ setup_lookup(dig_lookup_t *lookup) {
 		check_result(result, "dns_message_gettempname");
 		dns_name_init(lookup->oname, NULL);
 		/* XXX Helper funct to conv char* to name? */
-		len = (unsigned int) strlen(lookup->origin->origin);
-		isc_buffer_init(&b, lookup->origin->origin, len);
+#ifdef WITH_IDN_SUPPORT
+		result = idn_locale_to_ace(lookup->origin->origin,
+					    origin, sizeof(origin));
+		check_result(result, "convert origin to IDN encoding");
+		debug("trying idn origin %s", origin);
+#else
+		origin = lookup->origin->origin;
+#endif
+		len = (unsigned int) strlen(origin);
+		isc_buffer_init(&b, origin, len);
 		isc_buffer_add(&b, len);
 		result = dns_name_fromtext(lookup->oname, &b, dns_rootname,
 					   0, &lookup->onamebuf);
@@ -2187,7 +2168,7 @@ setup_lookup(dig_lookup_t *lookup) {
 			dns_message_puttempname(lookup->sendmsg,
 						&lookup->oname);
 			fatal("'%s' is not in legal name syntax (%s)",
-			      lookup->origin->origin,
+			      origin,
 			      isc_result_totext(result));
 		}
 		if (lookup->trace && lookup->trace_root) {
@@ -2198,8 +2179,8 @@ setup_lookup(dig_lookup_t *lookup) {
 
 			dns_fixedname_init(&fixed);
 			name = dns_fixedname_name(&fixed);
-			len = (unsigned int) strlen(lookup->textname);
-			isc_buffer_init(&b, lookup->textname, len);
+			len = (unsigned int) strlen(textname);
+			isc_buffer_init(&b, textname, len);
 			isc_buffer_add(&b, len);
 			result = dns_name_fromtext(name, &b, NULL, 0, NULL);
 			if (result == ISC_R_SUCCESS &&
@@ -2224,20 +2205,13 @@ setup_lookup(dig_lookup_t *lookup) {
 			}
 		}
 		dns_message_puttempname(lookup->sendmsg, &lookup->oname);
-	} else
-#endif
-	{
+	} else {
 		debug("using root origin");
 		if (lookup->trace && lookup->trace_root)
 			dns_name_clone(dns_rootname, lookup->name);
 		else {
-#ifdef WITH_IDN_SUPPORT
-			len = (unsigned int) strlen(idn_textname);
-			isc_buffer_init(&b, idn_textname, len);
-#else
-			len = (unsigned int) strlen(lookup->textname);
-			isc_buffer_init(&b, lookup->textname, len);
-#endif
+			len = (unsigned int) strlen(textname);
+			isc_buffer_init(&b, textname, len);
 			isc_buffer_add(&b, len);
 			result = dns_name_fromtext(lookup->name, &b,
 						   dns_rootname, 0,
@@ -4280,7 +4254,7 @@ idn_initialize(void) {
 	(void)setlocale(LC_ALL, "");
 #endif
 
-#ifdef HAVE_IDNKIT
+#ifdef WITH_IDNKIT
 	/* Create configuration context. */
 	result = idnkit_initialize();
 	check_result(result, "idnkit initializationt");
@@ -4292,24 +4266,13 @@ idn_initialize(void) {
 }
 
 static isc_result_t
-idn_locale_to_utf8(const char *from, char *to, size_t tolen) {
+idn_locale_to_ace(const char *from, char *to, size_t tolen) {
 #ifdef WITH_IDNKIT
-	return (idnkit_locale_to_utf8(from, to, tolen));
+	return (idnkit_locale_to_ace(from, to, tolen));
 #elif WITH_LIBIDN
-	return (libidn_locale_to_utf8(from, to, tolen));
+	return (libidn_locale_to_ace(from, to, tolen));
 #else /* WITH_LIBIDN2 */
-	return (libidn2_locale_to_utf8(from, to, tolen));
-#endif
-}
-
-static isc_result_t
-idn_utf8_to_ace(const char *from, char *to, size_t tolen) {
-#ifdef WITH_IDNKIT
-	return (idnkit_utf8_to_ace(from, to, tolen));
-#elif WITH_LIBIDN
-	return (libidn_utf8_to_ace(from, to, tolen));
-#else /* WITH_LIBIDN2 */
-	return (libidn2_utf8_to_ace(from, to, tolen));
+	return (libidn2_locale_to_ace(from, to, tolen));
 #endif
 }
 
@@ -4378,27 +4341,6 @@ output_filter(isc_buffer_t *buffer, unsigned int used_org,
 	return (ISC_R_SUCCESS);
 }
 
-static isc_result_t
-append_textname(char *name, const char *origin, size_t namesize) {
-	size_t namelen = strlen(name);
-	size_t originlen = strlen(origin);
-
-	/* Already absolute? */
-	if (namelen > 0 && name[namelen - 1] == '.')
-		return (ISC_R_SUCCESS);
-
-	/* Append dot and origin */
-	if (namelen + 1 + originlen >= namesize) {
-		debug("append_textname failure: name + origin is too long");
-		return (ISC_R_NOSPACE);
-	}
-
-	if (*origin != '.')
-		name[namelen++] = '.';
-	(void)strlcpy(name + namelen, origin, namesize - namelen);
-	return (ISC_R_SUCCESS);
-}
-
 #ifdef WITH_IDNKIT
 static isc_result_t
 idnkit_initialize(void) {
@@ -4416,37 +4358,32 @@ idnkit_initialize(void) {
 }
 
 static isc_result_t
-idnkit_locale_to_utf8(const char *from, char *to, size_t tolen) {
+idnkit_locale_to_ace(const char *from, char *to, size_t tolen) {
+	char utf8_textname[MXNAME];
+	isc_result_t res;
 	idn_result_t result;
 
-	result = idn_encodename(IDN_LOCALCONV | IDN_DELIMMAP, from, to, tolen);
+	result = idn_encodename(IDN_LOCALCONV | IDN_DELIMMAP, from,
+	                        utf8_textname, sizeof(utf8_textname));
 
-	if (result == idn_success) {
-		return (ISC_R_SUCCESS);
-	} else {
-		debug("idnkit idn_encodename failed: %s",
+	if (result != idn_success) {
+		debug("idnkit idn_encodename to utf8 failed: %s",
 		      idn_result_tostring(result));
 		return (ISC_R_FAILURE);
 	}
-}
-
-static isc_result_t
-idnkit_utf8_to_ace(const char *from, char *to, size_t tolen) {
-	idn_result_t result;
 
 	result = idn_encodename(IDN_LOCALMAP | IDN_NAMEPREP |
 			    IDN_IDNCONV | IDN_LENCHECK, from, to, tolen);
 
-	if (result == idn_success) {
-		return (ISC_R_SUCCESS);
-	} else {
-		debug("idnkit idn_encodename failed: %s",
+	if (result != idn_success) {
+		debug("idnkit idn_encodename to idn failed: %s",
 		      idn_result_tostring(result));
 		if (result == idn_invalid_length)
 			return (ISC_R_NOSPACE);
 		else
 			return (ISC_R_FAILURE);
 	}
+	return (ISC_R_SUCCESS);
 }
 
 static isc_result_t
@@ -4467,9 +4404,11 @@ idnkit_ace_to_locale(const char *from, char *to, size_t tolen) {
 
 #ifdef WITH_LIBIDN
 static isc_result_t
-libidn_locale_to_utf8(const char *from, char *to, size_t tolen) {
+libidn_locale_to_ace(const char *from, char *to, size_t tolen) {
 	isc_result_t result = ISC_R_FAILURE;
+	int res;
 	char *tmp_str = NULL;
+	char *ace_str = NULL;
 
 	tmp_str = stringprep_locale_to_utf8(from);
 
@@ -4479,40 +4418,31 @@ libidn_locale_to_utf8(const char *from, char *to, size_t tolen) {
 			result = ISC_R_FAILURE;
 			goto cleanup;
 		}
-
-		(void) strncpy(to, tmp_str, tolen);
-
-		result = ISC_R_SUCCESS;
 	}
+	else
+		return ISC_R_FAILURE;
 
-cleanup:
-	free(tmp_str);
-	return (result);
-}
-
-static isc_result_t
-libidn_utf8_to_ace(const char *from, char *to, size_t tolen) {
-	int res;
-	char *tmp_str = NULL;
-
-	res = idna_to_ascii_8z(from, &tmp_str, 0);
+	res = idna_to_ascii_8z(tmp_str, &ace_str, 0);
 
 	if (res == IDNA_SUCCESS) {
 		/* check the length */
 		if (strlen(tmp_str) >= tolen) {
 			debug("encoded ASC string is too long");
 			return ISC_R_FAILURE;
+		} else {
+			(void) strncpy(to, ace_str, tolen);
+			result = ISC_R_SUCCESS;
 		}
-
-		(void) strncpy(to, tmp_str, tolen);
-		free(tmp_str);
-		return ISC_R_SUCCESS;
 	} else {
 		debug("libidn idna_to_ascii_8z failed: %s",
 		      idna_strerror(res));
+		result = ISC_R_FAILURE;
 	}
 
-	return ISC_R_FAILURE;
+cleanup:
+	free(tmp_str);
+	free(ace_str);
+	return (result);
 }
 
 static isc_result_t
@@ -4547,9 +4477,8 @@ cleanup:
 #endif /* WITH_LIBIDN */
 
 #ifdef WITH_LIBIDN2
-/* Converts name from locale directly into ACE format, skip UTF-8 step */
 static isc_result_t
-libidn2_locale_to_utf8(const char *from, char *to, size_t tolen) {
+libidn2_locale_to_ace(const char *from, char *to, size_t tolen) {
 	int res;
 	char *tmp_str = NULL;
 
@@ -4561,32 +4490,16 @@ libidn2_locale_to_utf8(const char *from, char *to, size_t tolen) {
 		/* check the length */
 		if (strlen(tmp_str) >= tolen) {
 			debug("ACE string is too long");
-			free(tmp_str);
+			idn2_free(tmp_str);
 			return ISC_R_FAILURE;
 		}
 
-		(void) strncpy(to, tmp_str, tolen);
-		free(tmp_str);
-
+		(void) strcpy(to, tmp_str);
+		idn2_free(tmp_str);
 		return ISC_R_SUCCESS;
 	}
 
 	debug("libidn2 idn2_lookup_u8 failed: %s", idn2_strerror(res));
-	return ISC_R_FAILURE;
-}
-
-static isc_result_t
-libidn2_utf8_to_ace(const char *from, char *to, size_t tolen) {
-	int res;
-
-	/* Just check the format again. */
-	res = idn2_to_unicode_8zlz(from, NULL,
-			       IDN2_NONTRANSITIONAL|IDN2_NFC_INPUT);
-	if (res == IDN2_OK) {
-		strncpy(to, from, tolen);
-		return ISC_R_SUCCESS;
-	}
-	debug("libidn2 idn2_to_unicode_8zlz failed: %s", idn2_strerror(res));
 	if (res == IDN2_TOO_BIG_DOMAIN)
 		return ISC_R_NOSPACE;
 	else
