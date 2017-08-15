@@ -148,21 +148,10 @@ static void idn_initialize(void);
 static isc_result_t idn_locale_to_ace(const char *from,
 		char *to,
 		size_t tolen);
-static isc_result_t idn_ace_to_locale(const char *from,
-		char *to,
-		size_t tolen);
-static isc_result_t output_filter(isc_buffer_t *buffer,
-		unsigned int used_org,
-		isc_boolean_t absolute);
-
-#define MAXDLEN 256
 
 #ifdef WITH_IDNKIT
 static isc_result_t idnkit_initialize(void);
 static isc_result_t idnkit_locale_to_ace(const char *from,
-		char *to,
-		size_t tolen);
-static isc_result_t idnkit_ace_to_locale(const char *from,
 		char *to,
 		size_t tolen);
 
@@ -170,25 +159,39 @@ static isc_result_t idnkit_ace_to_locale(const char *from,
 static isc_result_t libidn_locale_to_ace(const char *from,
 		char *to,
 		size_t tolen);
+
+#elif WITH_LIBIDN2
+static isc_result_t libidn2_locale_to_ace(const char *from,
+		char *to,
+		size_t tolen);
+#endif
+#endif /* WITH_IDN_SUPPORT */
+
+#ifdef WITH_IDN_OUT_SUPPORT
+static isc_result_t idn_ace_to_locale(const char *from,
+		char *to,
+		size_t tolen);
+static isc_result_t output_filter(isc_buffer_t *buffer,
+		unsigned int used_org,
+		isc_boolean_t absolute);
+#define MAXDLEN 256
+
+#ifdef WITH_IDNKIT
+static isc_result_t idnkit_ace_to_locale(const char *from,
+		char *to,
+		size_t tolen);
+
+#elif WITH_LIBIDN
 static isc_result_t libidn_ace_to_locale(const char *from,
 		char *to,
 		size_t tolen);
 
 #elif WITH_LIBIDN2
-static isc_result_t libidn2_locale_to_utf8(const char *from,
-		char *to,
-		size_t tolen);
-static isc_result_t libidn2_utf8_to_ace(const char *from,
-		char *to,
-		size_t tolen);
-static isc_result_t libidn2_locale_to_ace(const char *from,
-		char *to,
-		size_t tolen);
 static isc_result_t libidn2_ace_to_locale(const char *from,
 		char *to,
 		size_t tolen);
 #endif
-#endif /* WITH_IDN_SUPPORT */
+#endif /* WITH_IDN_OUT_SUPPORT */
 
 isc_socket_t *keep = NULL;
 isc_sockaddr_t keepaddr;
@@ -689,7 +692,7 @@ make_empty_lookup(void) {
 	looknew->ttlunits = ISC_FALSE;
 	looknew->ttlunits = ISC_FALSE;
 	looknew->qr = ISC_FALSE;
-#ifdef WITH_IDN_SUPPORT
+#ifdef WITH_IDN_OUT_SUPPORT
 	looknew->idnout = ISC_TRUE;
 #else
 	looknew->idnout = ISC_FALSE;
@@ -1339,6 +1342,12 @@ setup_system(isc_boolean_t ipv4only, isc_boolean_t ipv6only) {
 
 #ifdef WITH_IDN_SUPPORT
 	idn_initialize();
+#endif
+
+#ifdef WITH_IDN_OUT_SUPPORT
+	/* Set domain name -> text post-conversion filter. */
+	result = dns_name_settotextfilter(output_filter);
+	check_result(result, "dns_name_settotextfilter");
 #endif
 
 	if (keyfile[0] != 0)
@@ -2076,7 +2085,7 @@ setup_lookup(dig_lookup_t *lookup) {
 	const char *textname = NULL;
 #endif
 
-#ifdef WITH_IDN_SUPPORT
+#ifdef WITH_IDN_OUT_SUPPORT
 	result = dns_name_settotextfilter(lookup->idnout ?
 					  output_filter : NULL);
 	check_result(result, "dns_name_settotextfilter");
@@ -4247,7 +4256,9 @@ destroy_libs(void) {
 #ifdef WITH_IDN_SUPPORT
 static void
 idn_initialize(void) {
+#ifdef WITH_IDNKIT
 	isc_result_t result;
+#endif
 
 #ifdef HAVE_SETLOCALE
 	/* Set locale */
@@ -4259,10 +4270,6 @@ idn_initialize(void) {
 	result = idnkit_initialize();
 	check_result(result, "idnkit initializationt");
 #endif
-
-	/* Set domain name -> text post-conversion filter. */
-	result = dns_name_settotextfilter(output_filter);
-	check_result(result, "dns_name_settotextfilter");
 }
 
 static isc_result_t
@@ -4276,6 +4283,7 @@ idn_locale_to_ace(const char *from, char *to, size_t tolen) {
 #endif
 }
 
+#ifdef WITH_IDN_OUT_SUPPORT
 static isc_result_t
 idn_ace_to_locale(const char *from, char *to, size_t tolen) {
 #ifdef WITH_IDNKIT
@@ -4340,6 +4348,7 @@ output_filter(isc_buffer_t *buffer, unsigned int used_org,
 
 	return (ISC_R_SUCCESS);
 }
+#endif
 
 #ifdef WITH_IDNKIT
 static void
@@ -4487,6 +4496,7 @@ libidn2_locale_to_ace(const char *from, char *to, size_t tolen) {
 	return ISC_R_FAILURE;
 }
 
+#ifdef WITH_IDN_OUT_SUPPORT
 static isc_result_t
 libidn2_ace_to_locale(const char *from, char *to, size_t tolen) {
 	int res;
@@ -4513,5 +4523,6 @@ libidn2_ace_to_locale(const char *from, char *to, size_t tolen) {
 
 	return ISC_R_FAILURE;
 }
+#endif /* WITH_IDN_OUT_SUPPORT */
 #endif /* WITH_LIBIDN2 */
 #endif /* WITH_IDN_SUPPORT */
