@@ -4342,19 +4342,20 @@ output_filter(isc_buffer_t *buffer, unsigned int used_org,
 }
 
 #ifdef WITH_IDNKIT
+static void
+idnkit_check_result(idn_result_t result, const char *msg) {
+	if (result != idn_success) {
+		fatal("%s: %s", msg, idn_result_tostring(result));
+	}
+}
+
 static isc_result_t
 idnkit_initialize(void) {
 	idn_result_t result;
 
 	result = idn_nameinit(1);
-
-	if (result == idn_success) {
-		return (ISC_R_SUCCESS);
-	} else {
-		debug("idnkit api initialization failed: %s",
-		      idn_result_tostring(result));
-		return (ISC_R_FAILURE);
-	}
+	idnkit_check_result(result, "idnkit api initialization failed");
+	return (ISC_R_SUCCESS);
 }
 
 static isc_result_t
@@ -4365,24 +4366,12 @@ idnkit_locale_to_ace(const char *from, char *to, size_t tolen) {
 
 	result = idn_encodename(IDN_LOCALCONV | IDN_DELIMMAP, from,
 	                        utf8_textname, sizeof(utf8_textname));
-
-	if (result != idn_success) {
-		debug("idnkit idn_encodename to utf8 failed: %s",
-		      idn_result_tostring(result));
-		return (ISC_R_FAILURE);
-	}
+	idnkit_check_result(result, "idnkit idn_encodename to utf8 failed");
 
 	result = idn_encodename(IDN_LOCALMAP | IDN_NAMEPREP |
-			    IDN_IDNCONV | IDN_LENCHECK, from, to, tolen);
-
-	if (result != idn_success) {
-		debug("idnkit idn_encodename to idn failed: %s",
-		      idn_result_tostring(result));
-		if (result == idn_invalid_length)
-			return (ISC_R_NOSPACE);
-		else
-			return (ISC_R_FAILURE);
-	}
+		                IDN_IDNCONV | IDN_LENCHECK,
+		                utf8_textname, to, tolen);
+	idnkit_check_result(result, "idnkit idn_encodename to idn failed");
 	return (ISC_R_SUCCESS);
 }
 
@@ -4391,14 +4380,12 @@ idnkit_ace_to_locale(const char *from, char *to, size_t tolen) {
 	idn_result_t result;
 
 	result = idn_decodename(IDN_DECODE_APP, from, to, tolen);
-
-	if (result == idn_success) {
-		return (ISC_R_SUCCESS);
-	} else {
+	if (result != idn_success) {
 		debug("idnkit idn_decodename failed: %s",
-		      idn_result_tostring(result) );
+		      idn_result_tostring(result));
 		return (ISC_R_FAILURE);
 	}
+	return (ISC_R_SUCCESS);
 }
 #endif /* WITH_IDNKIT */
 
@@ -4415,33 +4402,30 @@ libidn_locale_to_ace(const char *from, char *to, size_t tolen) {
 	if (tmp_str != NULL) {
 		if (strlen(tmp_str) >= tolen) {
 			debug("UTF-8 string is too long");
-			result = ISC_R_FAILURE;
-			goto cleanup;
+			free(tmp_str);
+			return ISC_R_NOSPACE;
 		}
 	}
 	else
 		return ISC_R_FAILURE;
 
 	res = idna_to_ascii_8z(tmp_str, &ace_str, 0);
-
 	if (res == IDNA_SUCCESS) {
 		/* check the length */
 		if (strlen(tmp_str) >= tolen) {
 			debug("encoded ASC string is too long");
-			return ISC_R_FAILURE;
+			result = ISC_R_NOSPACE;
 		} else {
 			(void) strncpy(to, ace_str, tolen);
 			result = ISC_R_SUCCESS;
 		}
-	} else {
-		debug("libidn idna_to_ascii_8z failed: %s",
-		      idna_strerror(res));
-		result = ISC_R_FAILURE;
 	}
 
-cleanup:
 	free(tmp_str);
 	free(ace_str);
+	if (res != IDNA_SUCCESS) {
+		fatal("idna_to_ascii_8z failed: %s", idna_strerror(res));
+	}
 	return (result);
 }
 
@@ -4465,7 +4449,7 @@ libidn_ace_to_locale(const char *from, char *to, size_t tolen) {
 
 		result = ISC_R_SUCCESS;
 	} else {
-		debug("libidn idna_to_unicode_8z8l failed: %s",
+		debug("idna_to_unicode_8z8l failed: %s",
 		      idna_strerror(res));
 		result = ISC_R_FAILURE;
 	}
@@ -4491,7 +4475,7 @@ libidn2_locale_to_ace(const char *from, char *to, size_t tolen) {
 		if (strlen(tmp_str) >= tolen) {
 			debug("ACE string is too long");
 			idn2_free(tmp_str);
-			return ISC_R_FAILURE;
+			return ISC_R_NOSPACE;
 		}
 
 		(void) strcpy(to, tmp_str);
@@ -4499,11 +4483,8 @@ libidn2_locale_to_ace(const char *from, char *to, size_t tolen) {
 		return ISC_R_SUCCESS;
 	}
 
-	debug("libidn2 idn2_lookup_u8 failed: %s", idn2_strerror(res));
-	if (res == IDN2_TOO_BIG_DOMAIN)
-		return ISC_R_NOSPACE;
-	else
-		return ISC_R_FAILURE;
+	fatal("idn2_lookup_ul failed: %s", idn2_strerror(res));
+	return ISC_R_FAILURE;
 }
 
 static isc_result_t
