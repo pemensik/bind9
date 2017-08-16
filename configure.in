@@ -4805,6 +4805,7 @@ AC_SUBST(IDNKIT_LIBS)
 #
 # IDN support using libidn
 #
+LIBIDN_LIBS=
 AC_ARG_WITH(libidn,
 	[  --with-libidn[=PATH]      enable IDN support using GNU libidn yes|no|path],
 	use_libidn="$withval", use_libidn="no")
@@ -4815,19 +4816,19 @@ yes)
 	else
 		libidn_path=$prefix
 	fi
+	LIBIDN_LIBS="-lidn"
 	;;
 no)
 	;;
 *)
+	LIBIDN_LIBS="-L$use_libidn/lib -lidn"
 	libidn_path="$use_libidn"
 	;;
 esac
 
-LIBIDN_LIBS=
 if test "$use_libidn" != no; then
 	AC_DEFINE(WITH_LIBIDN, 1, [define if libidn support is to be included.])
 	STD_CINCLUDES="$STD_CINCLUDES -I$libidn_path/include"
-	LIBIDN_LIBS="-lidn"
 fi
 AC_SUBST(LIBIDN_LIBS)
 
