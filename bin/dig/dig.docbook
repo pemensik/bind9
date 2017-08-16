@@ -764,6 +764,17 @@
 	</varlistentry>
 
 	<varlistentry>
+	  <term><option>+[no]idnin</option></term>
+	  <listitem>
+	    <para>
+	      Convert [do not convert] IDN on input.
+	      This requires IDN SUPPORT to have been enabled at
+	      compile time.  The default is to accept IDN input.
+	    </para>
+	  </listitem>
+	</varlistentry>
+
+	<varlistentry>
 	  <term><option>+[no]idnout</option></term>
 	  <listitem>
 	    <para>

@@ -692,6 +692,11 @@ make_empty_lookup(void) {
 	looknew->ttlunits = ISC_FALSE;
 	looknew->ttlunits = ISC_FALSE;
 	looknew->qr = ISC_FALSE;
+#ifdef WITH_IDN_SUPPORT
+	looknew->idnin = ISC_TRUE;
+#else
+	looknew->idnin = ISC_FALSE;
+#endif
 #ifdef WITH_IDN_OUT_SUPPORT
 	looknew->idnout = ISC_TRUE;
 #else
@@ -837,6 +842,7 @@ clone_lookup(dig_lookup_t *lookold, isc_boolean_t servers) {
 	looknew->nocrypto = lookold->nocrypto;
 	looknew->ttlunits = lookold->ttlunits;
 	looknew->qr = lookold->qr;
+	looknew->idnin = lookold->idnin;
 	looknew->idnout = lookold->idnout;
 	looknew->udpsize = lookold->udpsize;
 	looknew->edns = lookold->edns;
@@ -2078,11 +2084,10 @@ setup_lookup(dig_lookup_t *lookup) {
 	char store[MXNAME];
 	char ecsbuf[20];
 	char cookiebuf[256];
+	char *origin = NULL;
+	char *textname = NULL;
 #ifdef WITH_IDN_SUPPORT
-	char origin[MXNAME], textname[MXNAME];
-#else
-	const char *origin = NULL;
-	const char *textname = NULL;
+	char idn_origin[MXNAME], idn_textname[MXNAME];
 #endif
 
 #ifdef WITH_IDN_OUT_SUPPORT
@@ -2123,13 +2128,15 @@ setup_lookup(dig_lookup_t *lookup) {
 	 * `textname' doesn't contain TLD, but local mapping needs
 	 * TLD.
 	 */
-#ifdef WITH_IDN_SUPPORT
-	result = idn_locale_to_ace(lookup->textname, textname,
-				    sizeof(textname));
-	check_result(result, "convert textname to IDN encoding");
-	debug("textname: %s", textname);
-#else
 	textname = lookup->textname;
+#ifdef WITH_IDN_SUPPORT
+	if (lookup->idnin) {
+		result = idn_locale_to_ace(lookup->textname, idn_textname,
+					    sizeof(idn_textname));
+		check_result(result, "convert textname to IDN encoding");
+		debug("idn_textname: %s", idn_textname);
+		textname = idn_textname;
+	}
 #endif
 
 	/*
@@ -2158,13 +2165,15 @@ setup_lookup(dig_lookup_t *lookup) {
 		check_result(result, "dns_message_gettempname");
 		dns_name_init(lookup->oname, NULL);
 		/* XXX Helper funct to conv char* to name? */
-#ifdef WITH_IDN_SUPPORT
-		result = idn_locale_to_ace(lookup->origin->origin,
-					    origin, sizeof(origin));
-		check_result(result, "convert origin to IDN encoding");
-		debug("trying idn origin %s", origin);
-#else
 		origin = lookup->origin->origin;
+#ifdef WITH_IDN_SUPPORT
+		if (lookup->idnin) {
+			result = idn_locale_to_ace(lookup->origin->origin,
+						idn_origin, sizeof(idn_origin));
+			check_result(result, "convert origin to IDN encoding");
+			debug("trying idn origin %s", idn_origin);
+			origin = idn_origin;
+		}
 #endif
 		len = (unsigned int) strlen(origin);
 		isc_buffer_init(&b, origin, len);

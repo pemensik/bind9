@@ -126,6 +126,7 @@ struct dig_lookup {
 		use_usec,
 		nocrypto,
 		ttlunits,
+		idnin,
 		idnout,
 		qr;
 	char textname[MXNAME]; /*% Name we're going to be looking up */
