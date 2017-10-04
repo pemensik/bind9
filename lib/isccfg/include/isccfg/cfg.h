@@ -110,6 +110,11 @@ cfg_parse_file(cfg_parser_t *pctx, const char *file,
 	       const cfg_type_t *type, cfg_obj_t **ret);
 
 isc_result_t
+cfg_parse_file2(cfg_parser_t *pctx, const char *file,
+	        isc_boolean_t logerror,
+	        const cfg_type_t *type, cfg_obj_t **ret);
+
+isc_result_t
 cfg_parse_buffer(cfg_parser_t *pctx, isc_buffer_t *buffer,
 		 const cfg_type_t *type, cfg_obj_t **ret);
 isc_result_t

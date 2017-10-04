@@ -498,15 +498,19 @@ cfg_parser_create(isc_mem_t *mctx, isc_log_t *lctx, cfg_parser_t **ret) {
 }
 
 static isc_result_t
-parser_openfile(cfg_parser_t *pctx, const char *filename) {
+parser_openfile(cfg_parser_t *pctx,
+	        const char *filename,
+	        isc_boolean_t logerror)
+{
 	isc_result_t result;
 	cfg_listelt_t *elt = NULL;
 	cfg_obj_t *stringobj = NULL;
 
 	result = isc_lex_openfile(pctx->lexer, filename);
 	if (result != ISC_R_SUCCESS) {
-		cfg_parser_error(pctx, 0, "open: %s: %s",
-			     filename, isc_result_totext(result));
+		if (logerror)
+			cfg_parser_error(pctx, 0, "open: %s: %s",
+				     filename, isc_result_totext(result));
 		goto cleanup;
 	}
 
@@ -584,6 +588,14 @@ isc_result_t
 cfg_parse_file(cfg_parser_t *pctx, const char *filename,
 	       const cfg_type_t *type, cfg_obj_t **ret)
 {
+	return cfg_parse_file2(pctx, filename, ISC_TRUE, type, ret);
+}
+
+isc_result_t
+cfg_parse_file2(cfg_parser_t *pctx, const char *filename,
+	        isc_boolean_t logerror,
+	        const cfg_type_t *type, cfg_obj_t **ret)
+{
 	isc_result_t result;
 	cfg_listelt_t *elt;
 
@@ -592,7 +604,7 @@ cfg_parse_file(cfg_parser_t *pctx, const char *filename,
 	REQUIRE(type != NULL);
 	REQUIRE(ret != NULL && *ret == NULL);
 
-	CHECK(parser_openfile(pctx, filename));
+	CHECK(parser_openfile(pctx, filename, logerror));
 
 	result = parse2(pctx, type, ret);
 
@@ -1676,7 +1688,7 @@ cfg_parse_mapbody(cfg_parser_t *pctx, const cfg_type_t *type, cfg_obj_t **ret)
 			CHECK(cfg_parse_obj(pctx, &cfg_type_qstring, &includename));
 			CHECK(parse_semicolon(pctx));
 			CHECK(parser_openfile(pctx, includename->
-					      value.string.base));
+					      value.string.base, ISC_TRUE));
 			 cfg_obj_destroy(pctx, &includename);
 			 goto redo;
 		}
