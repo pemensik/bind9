@@ -7001,8 +7001,9 @@ count_newzones(dns_view_t *view, ns_cfgctx_t *nzcfg, int *num_zonesp) {
 	 * the parser each time.
 	 */
 	cfg_parser_reset(named_g_addparser);
-	result = cfg_parse_file(named_g_addparser, view->new_zone_file,
-				&cfg_type_addzoneconf, &nzcfg->nzf_config);
+	result = cfg_parse_file2(named_g_addparser, view->new_zone_file,
+		                 ISC_FALSE,
+		                 &cfg_type_addzoneconf, &nzcfg->nzf_config);
 	if (result == ISC_R_SUCCESS) {
 		int num_zones;
 
@@ -12304,8 +12305,9 @@ migrate_nzf(dns_view_t *view) {
 	 * will be written to DB.
 	 */
 	cfg_parser_reset(named_g_addparser);
-	result = cfg_parse_file(named_g_addparser, view->new_zone_file,
-				&cfg_type_addzoneconf, &nzf_config);
+	result = cfg_parse_file2(named_g_addparser, view->new_zone_file,
+				 ISC_FALSE,
+				 &cfg_type_addzoneconf, &nzf_config);
 	if (result != ISC_R_SUCCESS) {
 		isc_log_write(named_g_lctx,
 			      NAMED_LOGCATEGORY_GENERAL, NAMED_LOGMODULE_SERVER,
