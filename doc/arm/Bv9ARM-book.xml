@@ -4263,6 +4263,7 @@ badresp:1,adberr:0,findfail:0,valfail:0]
   [ <command>key-directory</command> <replaceable>path_name</replaceable> ; ]
   [ <command>managed-keys-directory</command> <replaceable>path_name</replaceable> ; ]
   [ <command>new-zones-directory</command> <replaceable>path_name</replaceable> ; ]
+  [ <command>databases-directory</command> <replaceable>path_name</replaceable> ; ]
   [ <command>named-xfer</command> <replaceable>path_name</replaceable> ; ]
   [ <command>tkey-gssapi-keytab</command> <replaceable>path_name</replaceable> ; ]
   [ <command>tkey-gssapi-credential</command> <replaceable>principal</replaceable> ; ]
@@ -4986,6 +4987,20 @@ badresp:1,adberr:0,findfail:0,valfail:0]
 	      <para>
 		Specifies the directory in which to store the configuration
 		parameters for zones added via <command>rndc addzone</command>.
+		By default, this is the working directory.
+	      </para>
+	    </listitem>
+	  </varlistentry>
+
+	  <varlistentry>
+	    <term><command>databases-directory</command></term>
+	    <listitem>
+	      <para>
+		Specifies the directory in which to store various server managed
+		databases. It includes negative trust
+		anchors added via <command>rndc nta</command>, configuration
+		parameters for zones added via <command>rndc addzone</command>
+		and the files that track managed DNSSEC keys.
 		By default, this is the working directory.
 	      </para>
 	    </listitem>

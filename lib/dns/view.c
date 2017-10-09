@@ -67,6 +67,10 @@
 #define DNS_VIEW_DELONLYHASH 111
 #define DNS_VIEW_FAILCACHESIZE 1021
 
+#ifndef PATH_MAX
+#define PATH_MAX 1024
+#endif
+
 static void resolver_shutdown(isc_task_t *task, isc_event_t *event);
 static void adb_shutdown(isc_task_t *task, isc_event_t *event);
 static void req_shutdown(isc_task_t *task, isc_event_t *event);
@@ -77,7 +81,6 @@ dns_view_create(isc_mem_t *mctx, dns_rdataclass_t rdclass,
 {
 	dns_view_t *view;
 	isc_result_t result;
-	char buffer[1024];
 
 	/*
 	 * Create a view.
@@ -90,7 +93,6 @@ dns_view_create(isc_mem_t *mctx, dns_rdataclass_t rdclass,
 	if (view == NULL)
 		return (ISC_R_NOMEMORY);
 
-	view->nta_file = NULL;
 	view->mctx = NULL;
 	isc_mem_attach(mctx, &view->mctx);
 	view->name = isc_mem_strdup(mctx, name);
@@ -99,15 +101,8 @@ dns_view_create(isc_mem_t *mctx, dns_rdataclass_t rdclass,
 		goto cleanup_view;
 	}
 
-	result = isc_file_sanitize(NULL, view->name, "nta",
-				   buffer, sizeof(buffer));
-	if (result != ISC_R_SUCCESS)
-		goto cleanup_name;
-	view->nta_file = isc_mem_strdup(mctx, buffer);
-	if (view->nta_file == NULL) {
-		result = ISC_R_NOMEMORY;
-		goto cleanup_name;
-	}
+	view->db_dir = NULL;
+	view->nta_file = NULL;
 
 	result = isc_mutex_init(&view->lock);
 	if (result != ISC_R_SUCCESS)
@@ -315,9 +310,6 @@ dns_view_create(isc_mem_t *mctx, dns_rdataclass_t rdclass,
 
  cleanup_mutex:
 	DESTROYLOCK(&view->lock);
-
-	if (view->nta_file != NULL)
-		isc_mem_free(mctx, view->nta_file);
 
  cleanup_name:
 	isc_mem_free(mctx, view->name);
@@ -533,7 +525,10 @@ destroy(dns_view_t *view) {
 	DESTROYLOCK(&view->new_zone_lock);
 	DESTROYLOCK(&view->lock);
 	isc_refcount_destroy(&view->references);
-	isc_mem_free(view->mctx, view->nta_file);
+	if (view->nta_file != NULL)
+		isc_mem_free(view->mctx, view->nta_file);
+	if (view->db_dir != NULL)
+		isc_mem_free(view->mctx, view->db_dir);
 	isc_mem_free(view->mctx, view->name);
 	isc_mem_putanddetach(&view->mctx, view, sizeof(*view));
 }
@@ -2002,10 +1997,6 @@ dns_view_untrust(dns_view_t *view, const dns_name_t *keyname,
  * fit in 'buflen'.
  */
 
-#ifndef PATH_MAX
-#define PATH_MAX 1024
-#endif
-
 static isc_result_t
 nz_legacy(const char *directory, const char *viewname,
 	  const char *suffix, char *buffer, size_t buflen)
@@ -2045,7 +2036,7 @@ dns_view_setnewzones(dns_view_t *view, isc_boolean_t allow, void *cfgctx,
 		     void (*cfg_destroy)(void **), isc_uint64_t mapsize)
 {
 	isc_result_t result = ISC_R_SUCCESS;
-	char buffer[1024];
+	char buffer[PATH_MAX];
 #ifdef HAVE_LMDB
 	MDB_env *env = NULL;
 	int status;
@@ -2283,6 +2274,46 @@ dns_view_setfailttl(dns_view_t *view, isc_uint32_t fail_ttl) {
 	view->fail_ttl = fail_ttl;
 }
 
+const char *
+dns_view_getdbdir(dns_view_t *view) {
+	REQUIRE(DNS_VIEW_VALID(view));
+
+	return (view->db_dir);
+}
+
+void
+dns_view_setdbdir(dns_view_t *view, const char *dir) {
+	REQUIRE(DNS_VIEW_VALID(view));
+
+	if (view->db_dir != NULL) {
+		isc_mem_free(view->mctx, view->db_dir);
+		view->db_dir = NULL;
+	}
+
+	if (dir != NULL)
+		view->db_dir = isc_mem_strdup(view->mctx, dir);
+}
+
+isc_result_t
+dns_view_ntapermanent(dns_view_t *view) {
+	isc_result_t result;
+	char buffer[PATH_MAX];
+
+	REQUIRE(view != NULL);
+	REQUIRE(view->name != NULL);
+	REQUIRE(view->mctx != NULL);
+
+	if (view->nta_file != NULL)
+		isc_mem_free(view->mctx, view->nta_file);
+	CHECK(isc_file_sanitize(view->db_dir, view->name, "nta",
+				   buffer, sizeof(buffer)));
+	view->nta_file = isc_mem_strdup(view->mctx, buffer);
+	if (view->nta_file == NULL)
+		result = ISC_R_NOMEMORY;
+cleanup:
+	return (result);
+}
+
 isc_result_t
 dns_view_saventa(dns_view_t *view) {
 	isc_result_t result;
@@ -2295,16 +2326,16 @@ dns_view_saventa(dns_view_t *view) {
 	if (view->nta_lifetime == 0)
 		return (ISC_R_SUCCESS);
 
-	/* Open NTA save file for overwrite. */
-	CHECK(isc_stdio_open(view->nta_file, "w", &fp));
-
 	result = dns_view_getntatable(view, &ntatable);
-	if (result == ISC_R_NOTFOUND) {
+	if (result == ISC_R_NOTFOUND || view->nta_file == NULL) {
 		removefile = ISC_TRUE;
 		result = ISC_R_SUCCESS;
 		goto cleanup;
 	} else
 		CHECK(result);
+
+	/* Open NTA save file for overwrite. */
+	CHECK(isc_stdio_open(view->nta_file, "w", &fp));
 
 	result = dns_ntatable_save(ntatable, fp);
 	if (result == ISC_R_NOTFOUND) {
@@ -2323,7 +2354,7 @@ dns_view_saventa(dns_view_t *view) {
 		(void)isc_stdio_close(fp);
 
 	/* Don't leave half-baked NTA save files lying around. */
-	if (result != ISC_R_SUCCESS || removefile)
+	if ((result != ISC_R_SUCCESS || removefile) && view->nta_file != NULL)
 		(void) isc_file_remove(view->nta_file);
 
 	return (result);
@@ -2344,6 +2375,8 @@ dns_view_loadnta(dns_view_t *view) {
 
 	if (view->nta_lifetime == 0)
 		return (ISC_R_SUCCESS);
+	if (view->nta_file == NULL)
+		return (ISC_R_NOTFOUND);
 
 	CHECK(isc_lex_create(view->mctx, 1025, &lex));
 	CHECK(isc_lex_openfile(lex, view->nta_file));

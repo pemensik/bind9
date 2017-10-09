@@ -675,6 +675,37 @@ configure_view_nametable(const cfg_obj_t *vconfig, const cfg_obj_t *config,
 }
 
 static isc_result_t
+directory_fromconfig(const cfg_obj_t * const *maps,
+		     const char *optionname,
+		     const char **directory)
+{
+	isc_result_t result;
+	const cfg_obj_t *obj = NULL;
+
+	REQUIRE(directory != NULL);
+
+	result = named_config_get(maps, optionname, &obj);
+	if (result == ISC_R_SUCCESS) {
+		const char *dir;
+
+		dir = cfg_obj_asstring(obj);
+		if (dir != NULL) {
+			result = isc_file_isdirectory(dir);
+		}
+		if (result == ISC_R_SUCCESS)
+			*directory = dir;
+		else {
+			isc_log_write(named_g_lctx, DNS_LOGCATEGORY_SECURITY,
+				      NAMED_LOGMODULE_SERVER, ISC_LOG_ERROR,
+				      "invalid %s %s: %s", optionname,
+				      dir, isc_result_totext(result));
+		}
+		return (result);
+	}
+	return (ISC_R_SUCCESS);
+}
+
+static isc_result_t
 dstkey_fromconfig(const cfg_obj_t *vconfig, const cfg_obj_t *key,
 		  isc_boolean_t managed, dst_key_t **target, isc_mem_t *mctx)
 {
@@ -894,8 +925,7 @@ configure_view_dnsseckeys(dns_view_t *view, const cfg_obj_t *vconfig,
 	const cfg_obj_t *maps[4];
 	const cfg_obj_t *voptions = NULL;
 	const cfg_obj_t *options = NULL;
-	const cfg_obj_t *obj = NULL;
-	const char *directory;
+	const char *directory = NULL;
 	int i = 0;
 
 	/* We don't need trust anchors for the _bind view */
@@ -1020,19 +1050,10 @@ configure_view_dnsseckeys(dns_view_t *view, const cfg_obj_t *vconfig,
 	/*
 	 * Add key zone for managed-keys.
 	 */
-	obj = NULL;
-	(void)named_config_get(maps, "managed-keys-directory", &obj);
-	directory = (obj != NULL ? cfg_obj_asstring(obj) : NULL);
-	if (directory != NULL)
-		result = isc_file_isdirectory(directory);
-	if (result != ISC_R_SUCCESS) {
-		isc_log_write(named_g_lctx, DNS_LOGCATEGORY_SECURITY,
-			      NAMED_LOGMODULE_SERVER, ISC_LOG_ERROR,
-			      "invalid managed-keys-directory %s: %s",
-			      directory, isc_result_totext(result));
-		goto cleanup;
+	CHECK(directory_fromconfig(maps, "managed-keys-directory", &directory));
+	if (!directory)
+		directory = dns_view_getdbdir(view);
 
-	}
 	CHECK(add_keydata_zone(view, directory, named_g_mctx));
 
   cleanup:
@@ -6903,6 +6924,32 @@ configure_session_key(const cfg_obj_t **maps, named_server_t *server,
 	return (result);
 }
 
+static isc_result_t
+setup_dbdir(dns_view_t *view, const cfg_obj_t *config, const cfg_obj_t *voptions)
+{
+	isc_result_t result;
+	const cfg_obj_t *maps[4];
+	const cfg_obj_t *options = NULL;
+	int i = 0;
+	const char *dir = NULL;
+
+	REQUIRE(config != NULL);
+
+	if (voptions != NULL)
+		maps[i++] = voptions;
+	result = cfg_map_get(config, "options", &options);
+	if (result == ISC_R_SUCCESS)
+		maps[i++] = options;
+	maps[i++] = named_g_defaults;
+	maps[i] = NULL;
+
+	CHECK(directory_fromconfig(maps, "databases-directory", &dir));
+	dns_view_setdbdir(view, dir);
+	CHECK(dns_view_ntapermanent(view));
+cleanup:
+	return (result);
+}
+
 #ifndef HAVE_LMDB
 static isc_result_t
 count_newzones(dns_view_t *view, ns_cfgctx_t *nzcfg, int *num_zonesp) {
@@ -6997,7 +7044,6 @@ setup_newzones(dns_view_t *view, cfg_obj_t *config, cfg_obj_t *vconfig,
 	const cfg_obj_t *maps[4];
 	const cfg_obj_t *options = NULL, *voptions = NULL;
 	const cfg_obj_t *nz = NULL;
-	const cfg_obj_t *nzdir = NULL;
 	const char *dir = NULL;
 	const cfg_obj_t *obj = NULL;
 	int i = 0;
@@ -7018,22 +7064,10 @@ setup_newzones(dns_view_t *view, cfg_obj_t *config, cfg_obj_t *vconfig,
 	result = named_config_get(maps, "allow-new-zones", &nz);
 	if (result == ISC_R_SUCCESS)
 		allow = cfg_obj_asboolean(nz);
-	result = named_config_get(maps, "new-zones-directory", &nzdir);
-	if (result == ISC_R_SUCCESS) {
-		dir = cfg_obj_asstring(nzdir);
-		if (dir != NULL) {
-			result = isc_file_isdirectory(dir);
-		}
-		if (result != ISC_R_SUCCESS) {
-			isc_log_write(named_g_lctx, DNS_LOGCATEGORY_SECURITY,
-				      NAMED_LOGMODULE_SERVER, ISC_LOG_ERROR,
-				      "invalid new-zones-directory %s: %s",
-				      dir, isc_result_totext(result));
-			return (result);
-		}
-
-		dns_view_setnewzonedir(view, dir);
-	}
+	CHECK(directory_fromconfig(maps, "new-zones-directory", &dir));
+	if (!dir)
+		dir = dns_view_getdbdir(view);
+	dns_view_setnewzonedir(view, dir);
 
 #ifdef HAVE_LMDB
 	result = named_config_get(maps, "lmdb-mapsize", &obj);
@@ -7111,6 +7145,8 @@ setup_newzones(dns_view_t *view, cfg_obj_t *config, cfg_obj_t *vconfig,
 		cfg_obj_attach(vconfig, &nzcfg->vconfig);
 
 	result = count_newzones(view, nzcfg, num_zones);
+
+cleanup:
 	return (result);
 }
 
@@ -8231,6 +8267,7 @@ load_configuration(const char *filename, named_server_t *server,
 
 		num_zones += count_zones(voptions);
 
+		CHECK(setup_dbdir(view, config, voptions));
 		CHECK(setup_newzones(view, config, vconfig, conf_parser,
 				     named_g_aclconfctx, &nzf_num_zones));
 		num_zones += nzf_num_zones;
@@ -8250,6 +8287,7 @@ load_configuration(const char *filename, named_server_t *server,
 
 		num_zones = count_zones(config);
 
+		CHECK(setup_dbdir(view, config, NULL));
 		CHECK(setup_newzones(view, config, NULL, conf_parser,
 				     named_g_aclconfctx, &nzf_num_zones));
 		num_zones += nzf_num_zones;
@@ -14185,9 +14223,10 @@ named_server_saventa(named_server_t *server) {
 		if (result != ISC_R_SUCCESS) {
 			isc_log_write(named_g_lctx, NAMED_LOGCATEGORY_GENERAL,
 				      NAMED_LOGMODULE_SERVER, ISC_LOG_ERROR,
-				      "error writing NTA file "
+				      "error writing NTA file '%s' "
 				      "for view '%s': %s",
-				      view->name, isc_result_totext(result));
+				      view->nta_file, view->name,
+				      isc_result_totext(result));
 		}
 	}
 
@@ -14210,9 +14249,10 @@ named_server_loadnta(named_server_t *server) {
 		{
 			isc_log_write(named_g_lctx, NAMED_LOGCATEGORY_GENERAL,
 				      NAMED_LOGMODULE_SERVER, ISC_LOG_ERROR,
-				      "error loading NTA file "
+				      "error loading NTA file '%s' "
 				      "for view '%s': %s",
-				      view->name, isc_result_totext(result));
+				      view->nta_file, view->name,
+				      isc_result_totext(result));
 		}
 	}
 

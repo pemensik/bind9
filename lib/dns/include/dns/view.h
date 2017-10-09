@@ -149,6 +149,7 @@ struct dns_view {
 	isc_uint32_t			nta_lifetime;
 	isc_uint32_t			nta_recheck;
 	char				*nta_file;
+	char				*db_dir;
 	dns_ttl_t			prefetch_trigger;
 	dns_ttl_t			prefetch_eligible;
 	in_port_t			dstport;
@@ -1301,6 +1302,31 @@ dns_view_setfailttl(dns_view_t *view, isc_uint32_t failttl);
  * Requires:
  *\li	'view' to be valid.
  */
+
+const char *
+dns_view_getdbdir(dns_view_t *view);
+void
+dns_view_setdbdir(dns_view_t *view, const char *dir);
+/*%<
+ * Set/get the path to the directory in which managed files should
+ * be stored. Managed files are mkeys, nzf, nzd, nta.
+ * If the path was previously set to a non-NULL value,
+ * the previous value is freed.
+ *
+ * Requires:
+ * \li 'view' is valid.
+ */
+
+isc_result_t
+dns_view_ntapermanent(dns_view_t *view);
+/*%<
+ * Initialize NTA file path in this view.
+ * Required before dns_view_loadnta and dns_view_saventa.
+ *
+ * Requires:
+ * \li	'view' to be valid.
+ */
+
 
 isc_result_t
 dns_view_saventa(dns_view_t *view);
