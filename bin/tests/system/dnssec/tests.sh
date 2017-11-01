@@ -2093,7 +2093,7 @@ fi
 n=`expr $n + 1`
 echo "I:checking managed key maintenance has not started yet ($n)"
 ret=0
-[ -f "ns4/managed-keys.bind.jnl" ] && ret=1
+[ -f "ns4/db/managed-keys.bind.jnl" ] && ret=1
 n=`expr $n + 1`
 if [ $ret != 0 ]; then echo "I:failed"; fi
 status=`expr $status + $ret`
@@ -2107,7 +2107,7 @@ sleep 5
 
 echo "I:checking managed key maintenance timer has now started ($n)"
 ret=0
-[ -f "ns4/managed-keys.bind.jnl" ] || ret=1
+[ -f "ns4/db/managed-keys.bind.jnl" ] || ret=1
 n=`expr $n + 1`
 if [ $ret != 0 ]; then echo "I:failed"; fi
 status=`expr $status + $ret`
@@ -2822,10 +2822,10 @@ $RNDC -c ../common/rndc.conf -s 10.53.0.4 -p 9953 managed-keys sync 2>&1 | sed '
 for i in 1 2 3 4 5 6 7 8 9
 do
     ret=0
-    if test -f ns4/managed-keys.bind
+    if test -f ns4/db/managed-keys.bind
     then
-	grep KEYDATA ns4/managed-keys.bind > /dev/null &&
-	grep "next refresh:" ns4/managed-keys.bind > /dev/null &&
+	grep KEYDATA ns4/db/managed-keys.bind > /dev/null &&
+	grep "next refresh:" ns4/db/managed-keys.bind > /dev/null &&
 	break
     fi
     ret=1
