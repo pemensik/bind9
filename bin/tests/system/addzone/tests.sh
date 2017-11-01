@@ -583,7 +583,7 @@ n=`expr $n + 1`
 if [ $ret != 0 ]; then echo "I:failed"; fi
 status=`expr $status + $ret`
 
-echo "I:reconfiguring server with multiple views and new-zones-directory"
+echo "I:reconfiguring server with multiple views and databases-directory"
 rm -f ns2/named.conf
 cp -f ns2/named3.conf ns2/named.conf
 $RNDC -c ../common/rndc.conf -s 10.53.0.2 -p 9953 reconfig 2>&1 | sed 's/^/I:ns2 /'
@@ -629,10 +629,10 @@ if [ $ret != 0 ]; then echo "I:failed"; fi
 status=`expr $status + $ret`
 
 if [ -n "$NZD" ]; then
-    echo "I:checking NZD file was created in new-zones-directory ($n)"
+    echo "I:checking NZD file was created in databases-directory ($n)"
     expect=ns2/new-zones/directory.nzd
 else
-    echo "I:checking NZF file was created in new-zones-directory ($n)"
+    echo "I:checking NZF file was created in databases-directory ($n)"
     expect=ns2/new-zones/directory.nzf
 fi
 $RNDC -c ../common/rndc.conf -s 10.53.0.2 -p 9953 sync 'added.example IN directory' 2>&1 | sed 's/^/I:ns2 /'

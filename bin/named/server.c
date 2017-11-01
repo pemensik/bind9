@@ -7044,7 +7044,6 @@ setup_newzones(dns_view_t *view, cfg_obj_t *config, cfg_obj_t *vconfig,
 	const cfg_obj_t *maps[4];
 	const cfg_obj_t *options = NULL, *voptions = NULL;
 	const cfg_obj_t *nz = NULL;
-	const char *dir = NULL;
 	const cfg_obj_t *obj = NULL;
 	int i = 0;
 	isc_uint64_t mapsize = 0ULL;
@@ -7064,10 +7063,6 @@ setup_newzones(dns_view_t *view, cfg_obj_t *config, cfg_obj_t *vconfig,
 	result = named_config_get(maps, "allow-new-zones", &nz);
 	if (result == ISC_R_SUCCESS)
 		allow = cfg_obj_asboolean(nz);
-	CHECK(directory_fromconfig(maps, "new-zones-directory", &dir));
-	if (!dir)
-		dir = dns_view_getdbdir(view);
-	dns_view_setnewzonedir(view, dir);
 
 #ifdef HAVE_LMDB
 	result = named_config_get(maps, "lmdb-mapsize", &obj);

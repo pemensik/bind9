@@ -232,7 +232,6 @@ dns_view_create(isc_mem_t *mctx, dns_rdataclass_t rdclass,
 	view->requireservercookie = ISC_FALSE;
 	view->synthfromdnssec = ISC_TRUE;
 	view->trust_anchor_telemetry = ISC_TRUE;
-	view->new_zone_dir = NULL;
 	view->new_zone_file = NULL;
 	view->new_zone_db = NULL;
 	view->new_zone_dbenv = NULL;
@@ -505,10 +504,6 @@ destroy(dns_view_t *view) {
 	if (view->new_zone_file != NULL) {
 		isc_mem_free(view->mctx, view->new_zone_file);
 		view->new_zone_file = NULL;
-	}
-	if (view->new_zone_dir != NULL) {
-		isc_mem_free(view->mctx, view->new_zone_dir);
-		view->new_zone_dir = NULL;
 	}
 #ifdef HAVE_LMDB
 	if (view->new_zone_dbenv != NULL)
@@ -2075,7 +2070,7 @@ dns_view_setnewzones(dns_view_t *view, isc_boolean_t allow, void *cfgctx,
 		return (ISC_R_SUCCESS);
 	}
 
-	CHECK(nz_legacy(view->new_zone_dir, view->name, "nzf",
+	CHECK(nz_legacy(view->db_dir, view->name, "nzf",
 			buffer, sizeof(buffer)));
 
 	view->new_zone_file = isc_mem_strdup(view->mctx, buffer);
@@ -2084,7 +2079,7 @@ dns_view_setnewzones(dns_view_t *view, isc_boolean_t allow, void *cfgctx,
 	}
 
 #ifdef HAVE_LMDB
-	CHECK(nz_legacy(view->new_zone_dir, view->name, "nzd",
+	CHECK(nz_legacy(view->db_dir, view->name, "nzd",
 			buffer, sizeof(buffer)));
 
 	view->new_zone_db = isc_mem_strdup(view->mctx, buffer);
@@ -2150,29 +2145,6 @@ dns_view_setnewzones(dns_view_t *view, isc_boolean_t allow, void *cfgctx,
 	}
 
 	return (result);
-}
-
-void
-dns_view_setnewzonedir(dns_view_t *view, const char *dir) {
-	REQUIRE(DNS_VIEW_VALID(view));
-
-	if (view->new_zone_dir != NULL) {
-		isc_mem_free(view->mctx, view->new_zone_dir);
-		view->new_zone_dir = NULL;
-	}
-
-	if (dir == NULL) {
-		return;
-	}
-
-	view->new_zone_dir = isc_mem_strdup(view->mctx, dir);
-}
-
-const char *
-dns_view_getnewzonedir(dns_view_t *view) {
-	REQUIRE(DNS_VIEW_VALID(view));
-
-	return (view->new_zone_dir);
 }
 
 isc_result_t

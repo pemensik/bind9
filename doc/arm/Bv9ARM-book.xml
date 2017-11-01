@@ -4262,7 +4262,6 @@ badresp:1,adberr:0,findfail:0,valfail:0]
   [ <command>geoip-directory</command> <replaceable>path_name</replaceable> ; ]
   [ <command>key-directory</command> <replaceable>path_name</replaceable> ; ]
   [ <command>managed-keys-directory</command> <replaceable>path_name</replaceable> ; ]
-  [ <command>new-zones-directory</command> <replaceable>path_name</replaceable> ; ]
   [ <command>databases-directory</command> <replaceable>path_name</replaceable> ; ]
   [ <command>named-xfer</command> <replaceable>path_name</replaceable> ; ]
   [ <command>tkey-gssapi-keytab</command> <replaceable>path_name</replaceable> ; ]
@@ -4977,17 +4976,6 @@ badresp:1,adberr:0,findfail:0,valfail:0]
 		compatibility after upgrade, if a file using the old
 		name format is found to exist, it will be used instead
 		of the new format.)
-	      </para>
-	    </listitem>
-	  </varlistentry>
-
-	  <varlistentry>
-	    <term><command>new-zones-directory</command></term>
-	    <listitem>
-	      <para>
-		Specifies the directory in which to store the configuration
-		parameters for zones added via <command>rndc addzone</command>.
-		By default, this is the working directory.
 	      </para>
 	    </listitem>
 	  </varlistentry>
