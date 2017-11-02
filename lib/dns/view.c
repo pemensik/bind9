@@ -2315,7 +2315,11 @@ dns_view_saventa(dns_view_t *view) {
 		result = ISC_R_SUCCESS;
 	} else if (result == ISC_R_SUCCESS) {
 		result = isc_stdio_close(fp);
-		fp = NULL;
+		fp = NULL;	
+		isc_log_write(dns_lctx, DNS_LOGCATEGORY_GENERAL,
+			      ISC_LOGMODULE_OTHER, ISC_LOG_DEBUG(1),
+			      "written nta file '%s'",
+			      view->nta_file);
 	}
 
  cleanup:
@@ -2326,8 +2330,15 @@ dns_view_saventa(dns_view_t *view) {
 		(void)isc_stdio_close(fp);
 
 	/* Don't leave half-baked NTA save files lying around. */
-	if ((result != ISC_R_SUCCESS || removefile) && view->nta_file != NULL)
+	if ((result != ISC_R_SUCCESS || removefile) && view->nta_file != NULL) {
+
 		(void) isc_file_remove(view->nta_file);
+		
+		isc_log_write(dns_lctx, DNS_LOGCATEGORY_GENERAL,
+			      ISC_LOGMODULE_OTHER, ISC_LOG_DEBUG(1),
+			      "removed nta file '%s'",
+			      view->nta_file);
+	}
 
 	return (result);
 }
