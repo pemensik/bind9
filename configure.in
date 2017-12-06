@@ -4731,7 +4731,7 @@ NOM_PATH_FILE(XSLT_DBLATEX_FASTBOOK, xsl/latex_book_fast.xsl, $dblatex_xsl_trees
 #
 AC_ARG_WITH(idnkit,
 	    AS_HELP_STRING([--with-idnkit[=PATH]],
-			   [enable IDN support using idnkit idnkit yes|no|path]),
+			   [enable IDN support using idnkit [yes|no|path]]),
 	use_idnkit="$withval", use_idnkit="no")
 case "$use_idnkit" in
 yes)
@@ -4807,7 +4807,7 @@ AC_SUBST(IDNKIT_LIBS)
 #
 LIBIDN_LIBS=
 AC_ARG_WITH(libidn,
-	[  --with-libidn[=PATH]      enable IDN support using GNU libidn yes|no|path],
+	AS_HELP_STRING([--with-libidn[=PATH]], [enable IDN support using GNU libidn [yes|no|path]]),
 	use_libidn="$withval", use_libidn="no")
 case "$use_libidn" in
 yes)
@@ -4838,7 +4838,7 @@ AC_SUBST(LIBIDN_LIBS)
 
 LIBIDN2_LIBS=
 AC_ARG_WITH(libidn2,
-	[  --with-libidn2[=PATH]     enable IDN support using GNU libidn2 yes|no|path],
+	AS_HELP_STRING([--with-libidn2[=PATH]], [enable IDN support using GNU libidn2 [yes|no|path]]),
 	use_libidn2="$withval", use_libidn2="no")
 case "$use_libidn2" in
 yes)
@@ -4907,7 +4907,7 @@ fi
 # Check whether to build Automated Test Framework unit tests
 #
 AC_ARG_WITH(atf,
-	    AS_HELP_STRING([--with-atf],[support Automated Test Framework]),
+	    AS_HELP_STRING([--with-atf=ARG],[support Automated Test Framework]),
 	atf="$withval", atf="no")
 if test "yes" = "$atf"; then
 	atf=`pwd`/unit/atf
