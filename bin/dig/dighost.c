@@ -4497,7 +4497,7 @@ libidn2_locale_to_ace(const char *from, char *to, size_t tolen) {
 			return ISC_R_NOSPACE;
 		}
 
-		(void) strcpy(to, tmp_str);
+		(void) strlcpy(to, tmp_str, tolen);
 		idn2_free(tmp_str);
 		return ISC_R_SUCCESS;
 	}
