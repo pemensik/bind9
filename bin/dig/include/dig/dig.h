@@ -266,7 +266,7 @@ extern char *progname;
 extern int tries;
 extern int fatalexit;
 extern isc_boolean_t verbose;
-#ifdef WITH_IDN
+#ifdef WITH_IDNKIT
 extern int idnoptions;
 #endif
 

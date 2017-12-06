@@ -177,6 +177,8 @@ static isc_result_t output_filter(isc_buffer_t *buffer,
 #define MAXDLEN 256
 
 #ifdef WITH_IDNKIT
+int idnoptions = 0;
+
 static isc_result_t idnkit_ace_to_locale(const char *from,
 		char *to,
 		size_t tolen);
@@ -4379,14 +4381,13 @@ idnkit_initialize(void) {
 static isc_result_t
 idnkit_locale_to_ace(const char *from, char *to, size_t tolen) {
 	char utf8_textname[MXNAME];
-	isc_result_t res;
 	idn_result_t result;
 
 	result = idn_encodename(IDN_LOCALCONV | IDN_DELIMMAP, from,
 	                        utf8_textname, sizeof(utf8_textname));
 	idnkit_check_result(result, "idnkit idn_encodename to utf8 failed");
 
-	result = idn_encodename(IDN_LOCALMAP | IDN_NAMEPREP |
+	result = idn_encodename(idnoptions | IDN_LOCALMAP | IDN_NAMEPREP |
 		                IDN_IDNCONV | IDN_LENCHECK,
 		                utf8_textname, to, tolen);
 	idnkit_check_result(result, "idnkit idn_encodename to idn failed");
