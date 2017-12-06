@@ -155,12 +155,12 @@ static isc_result_t idnkit_locale_to_ace(const char *from,
 		char *to,
 		size_t tolen);
 
-#elif WITH_LIBIDN
+#elif defined(WITH_LIBIDN)
 static isc_result_t libidn_locale_to_ace(const char *from,
 		char *to,
 		size_t tolen);
 
-#elif WITH_LIBIDN2
+#elif defined(WITH_LIBIDN2)
 static isc_result_t libidn2_locale_to_ace(const char *from,
 		char *to,
 		size_t tolen);
@@ -183,12 +183,12 @@ static isc_result_t idnkit_ace_to_locale(const char *from,
 		char *to,
 		size_t tolen);
 
-#elif WITH_LIBIDN
+#elif defined(WITH_LIBIDN)
 static isc_result_t libidn_ace_to_locale(const char *from,
 		char *to,
 		size_t tolen);
 
-#elif WITH_LIBIDN2
+#elif defined(WITH_LIBIDN2)
 static isc_result_t libidn2_ace_to_locale(const char *from,
 		char *to,
 		size_t tolen);
@@ -4287,10 +4287,13 @@ static isc_result_t
 idn_locale_to_ace(const char *from, char *to, size_t tolen) {
 #ifdef WITH_IDNKIT
 	return (idnkit_locale_to_ace(from, to, tolen));
-#elif WITH_LIBIDN
+#elif defined(WITH_LIBIDN)
 	return (libidn_locale_to_ace(from, to, tolen));
-#else /* WITH_LIBIDN2 */
+#elif defined(WITH_LIBIDN2)
 	return (libidn2_locale_to_ace(from, to, tolen));
+#else
+	/* Broken configure if this is reached. */
+	return (ISC_R_NOTIMPLEMENTED);
 #endif
 }
 
@@ -4299,10 +4302,13 @@ static isc_result_t
 idn_ace_to_locale(const char *from, char *to, size_t tolen) {
 #ifdef WITH_IDNKIT
 	return (idnkit_ace_to_locale(from, to, tolen));
-#elif WITH_LIBIDN
+#elif defined(WITH_LIBIDN)
 	return (libidn_ace_to_locale(from, to, tolen));
-#else /* WITH_LIBIDN2 */
+#elif defined(WITH_LIBIDN2)
 	return (libidn2_ace_to_locale(from, to, tolen));
+#else
+	/* Broken configure if this is reached. */
+	return (ISC_R_NOTIMPLEMENTED);
 #endif
 }
 
@@ -4527,7 +4533,7 @@ libidn2_ace_to_locale(const char *from, char *to, size_t tolen) {
 		free(tmp_str);
 		return ISC_R_SUCCESS;
 	} else {
-		debug("libidn idna_to_ascii_8z failed: %s",
+		debug("idn2_to_unicode_8zlz failed: %s",
 		      idn2_strerror(res));
 	}
 
