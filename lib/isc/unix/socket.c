@@ -4054,12 +4054,23 @@ check_write:
 
 }
 
+static void check_max_events(isc__socketmgr_t *manager, int nevents) {
+	if (nevents == manager->nevents) {
+		manager_log(manager, ISC_LOGCATEGORY_GENERAL,
+			    ISC_LOGMODULE_SOCKET, ISC_LOG_INFO,
+			    "maximum number of FD events (%d) received",
+			    nevents);
+	}
+}
+
 #ifdef USE_KQUEUE
 static isc_boolean_t
-process_fds(isc__socketmgr_t *manager, struct kevent *events, int nevents) {
+process_fds(isc__socketmgr_t *manager, isc_socketwait_t *swait) {
 	int i;
 	isc_boolean_t readable, writable;
 	isc_boolean_t have_ctlevent = ISC_FALSE;
+	struct kevent *events = manager->events;
+	int nevents = swait->nevents;
 
 	for (i = 0; i < nevents; i++) {
 		REQUIRE(events[i].ident < manager->maxsocks);
@@ -4076,19 +4087,15 @@ process_fds(isc__socketmgr_t *manager, struct kevent *events, int nevents) {
 
 	return have_ctlevent;
 }
+
 #elif defined(USE_EPOLL)
 static isc_boolean_t
-process_fds(isc__socketmgr_t *manager, struct epoll_event *events, int nevents)
+process_fds(isc__socketmgr_t *manager, isc_socketwait_t *swait)
 {
 	int i;
 	isc_boolean_t have_ctlevent = ISC_FALSE;
-
-	if (nevents == manager->nevents) {
-		manager_log(manager, ISC_LOGCATEGORY_GENERAL,
-			    ISC_LOGMODULE_SOCKET, ISC_LOG_INFO,
-			    "maximum number of FD events (%d) received",
-			    nevents);
-	}
+	int nevents = swait->nevents;
+	struct epoll_event *events = manager->events;
 
 	for (i = 0; i < nevents; i++) {
 		REQUIRE(events[i].data.fd < (int)manager->maxsocks);
@@ -4119,16 +4126,11 @@ process_fds(isc__socketmgr_t *manager, struct epoll_event *events, int nevents)
 }
 #elif defined(USE_DEVPOLL)
 static isc_boolean_t
-process_fds(isc__socketmgr_t *manager, struct pollfd *events, int nevents) {
+process_fds(isc__socketmgr_t *manager, isc_socketwait_t *swait) {
 	int i;
 	isc_boolean_t have_ctlevent = ISC_FALSE;
-
-	if (nevents == manager->nevents) {
-		manager_log(manager, ISC_LOGCATEGORY_GENERAL,
-			    ISC_LOGMODULE_SOCKET, ISC_LOG_INFO,
-			    "maximum number of FD events (%d) received",
-			    nevents);
-	}
+	struct pollfd *events = manager->events;
+	int nevents = swait->events;
 
 	for (i = 0; i < nevents; i++) {
 		REQUIRE(events[i].fd < (int)manager->maxsocks);
@@ -4147,25 +4149,24 @@ process_fds(isc__socketmgr_t *manager, struct pollfd *events, int nevents) {
 }
 #elif defined(USE_SELECT)
 static isc_boolean_t
-process_fds(isc__socketmgr_t *manager, int maxfd, fd_set *readfds,
-	    fd_set *writefds)
+process_fds(isc__socketmgr_t *manager, isc_socketwait_t *swait)
 {
 	int i;
 
-	REQUIRE(maxfd <= (int)manager->maxsocks);
+	REQUIRE(swait->maxfd <= (int)manager->maxsocks);
 
 	for (i = 0; i < maxfd; i++) {
 #ifdef USE_WATCHER_THREAD
 		if (i == manager->pipe_fds[0] || i == manager->pipe_fds[1])
 			continue;
 #endif /* USE_WATCHER_THREAD */
-		process_fd(manager, i, FD_ISSET(i, readfds),
-			   FD_ISSET(i, writefds));
+		process_fd(manager, i, FD_ISSET(i, swait->readfds),
+			   FD_ISSET(i, swait->writefds));
 	}
 		/*
 		 * Process reads on internal, control fd.
 		 */
-	return (ISC_TF(FD_ISSET(ctlfd, readfds)));
+	return (ISC_TF(FD_ISSET(ctlfd, swait->readfds)));
 }
 #endif
 
@@ -4210,6 +4211,118 @@ process_ctlfd(isc__socketmgr_t *manager) {
 	return (ISC_FALSE);
 }
 
+#ifdef USE_KQUEUE
+static int
+kqueue_watcher(isc__socketmgr_t *manager) {
+	return kevent(manager->kqueue_fd, NULL, 0,
+		    manager->events, manager->nevents, NULL);
+}
+#endif
+#ifdef USE_EPOLL
+static int
+epoll_watcher(isc__socketmgr_t *manager) {
+	return epoll_wait(manager->epoll_fd, manager->events,
+			manager->nevents, -1);
+}
+#endif
+
+#ifdef USE_DEVPOLL
+static int
+devpoll_watcher(isc__socketmgr_t *manager) {
+	isc_result_t result;
+	struct dvpoll dvp;
+	int pass;
+	int cc;
+#if defined(ISC_SOCKET_USE_POLLWATCH)
+	pollstate_t pollstate = poll_idle;
+#endif
+
+	/*
+	 * Re-probe every thousand calls.
+	 */
+	if (manager->calls++ > 1000U) {
+		result = isc_resource_getcurlimit(
+					isc_resource_openfiles,
+					&manager->open_max);
+		if (result != ISC_R_SUCCESS)
+			manager->open_max = 64;
+		manager->calls = 0;
+	}
+	for (pass = 0; pass < 2; pass++) {
+		dvp.dp_fds = manager->events;
+		dvp.dp_nfds = manager->nevents;
+		if (dvp.dp_nfds >= manager->open_max)
+			dvp.dp_nfds = manager->open_max - 1;
+#ifndef ISC_SOCKET_USE_POLLWATCH
+		dvp.dp_timeout = -1;
+#else
+		if (pollstate == poll_idle)
+			dvp.dp_timeout = -1;
+		else
+			dvp.dp_timeout =
+				 ISC_SOCKET_POLLWATCH_TIMEOUT;
+#endif	/* ISC_SOCKET_USE_POLLWATCH */
+		cc = ioctl(manager->devpoll_fd, DP_POLL, &dvp);
+		if (cc == -1 && errno == EINVAL) {
+			/*
+			 * {OPEN_MAX} may have dropped.  Look
+			 * up the current value and try again.
+			 */
+			result = isc_resource_getcurlimit(
+					isc_resource_openfiles,
+					&manager->open_max);
+			if (result != ISC_R_SUCCESS)
+				manager->open_max = 64;
+		} else
+			break;
+	}
+
+#ifdef ISC_SOCKET_USE_POLLWATCH
+	if (cc == 0) {
+		if (pollstate == poll_active)
+			pollstate = poll_checking;
+		else if (pollstate == poll_checking)
+			pollstate = poll_idle;
+	} else if (cc > 0) {
+		if (pollstate == poll_checking) {
+			/*
+			 * XXX: We'd like to use a more
+			 * verbose log level as it's actually an
+			 * unexpected event, but the kernel bug
+			 * reportedly happens pretty frequently
+			 * (and it can also be a false positive)
+			 * so it would be just too noisy.
+			 */
+			manager_log(manager,
+				    ISC_LOGCATEGORY_GENERAL,
+				    ISC_LOGMODULE_SOCKET,
+				    ISC_LOG_DEBUG(1),
+				    "unexpected POLL timeout");
+		}
+		pollstate = poll_active;
+	}
+#endif
+	/* FIXME: handle result? */
+	return cc;
+}
+#endif
+
+#ifdef USE_SELECT
+static int
+select_watcher(isc__socketmgr_t *manager) {
+	LOCK(&manager->lock);
+	memmove(manager->read_fds_copy, manager->read_fds,
+		manager->fd_bufsize);
+	memmove(manager->write_fds_copy, manager->write_fds,
+		manager->fd_bufsize);
+	maxfd = manager->maxfd + 1;
+	UNLOCK(&manager->lock);
+
+	return select(maxfd, manager->read_fds_copy,
+		    manager->write_fds_copy, NULL, NULL);
+}
+#endif
+
 /*
  * This is the thread that will loop forever, always in a select or poll
  * call.
@@ -4237,76 +4350,21 @@ watcher(void *uap) {
 #elif defined (USE_SELECT)
 	const char *fnname = "select()";
 	int maxfd;
-	int ctlfd;
 #endif
+	isc_sockwait_t swait;
 	char strbuf[ISC_STRERRORSIZE];
 
-#if defined (USE_SELECT)
-	/*
-	 * Get the control fd here.  This will never change.
-	 */
-	ctlfd = manager->pipe_fds[0];
-#endif
 	done = ISC_FALSE;
 	while (!done) {
 		do {
 #ifdef USE_KQUEUE
-			cc = kevent(manager->kqueue_fd, NULL, 0,
-				    manager->events, manager->nevents, NULL);
+			cc = kqueue_watcher(manager);
 #elif defined(USE_EPOLL)
-			cc = epoll_wait(manager->epoll_fd, manager->events,
-					manager->nevents, -1);
+			cc = epoll_watcher(manager);
 #elif defined(USE_DEVPOLL)
-			/*
-			 * Re-probe every thousand calls.
-			 */
-			if (manager->calls++ > 1000U) {
-				result = isc_resource_getcurlimit(
-							isc_resource_openfiles,
-							&manager->open_max);
-				if (result != ISC_R_SUCCESS)
-					manager->open_max = 64;
-				manager->calls = 0;
-			}
-			for (pass = 0; pass < 2; pass++) {
-				dvp.dp_fds = manager->events;
-				dvp.dp_nfds = manager->nevents;
-				if (dvp.dp_nfds >= manager->open_max)
-					dvp.dp_nfds = manager->open_max - 1;
-#ifndef ISC_SOCKET_USE_POLLWATCH
-				dvp.dp_timeout = -1;
-#else
-				if (pollstate == poll_idle)
-					dvp.dp_timeout = -1;
-				else
-					dvp.dp_timeout =
-						 ISC_SOCKET_POLLWATCH_TIMEOUT;
-#endif	/* ISC_SOCKET_USE_POLLWATCH */
-				cc = ioctl(manager->devpoll_fd, DP_POLL, &dvp);
-				if (cc == -1 && errno == EINVAL) {
-					/*
-					 * {OPEN_MAX} may have dropped.  Look
-					 * up the current value and try again.
-					 */
-					result = isc_resource_getcurlimit(
-							isc_resource_openfiles,
-							&manager->open_max);
-					if (result != ISC_R_SUCCESS)
-						manager->open_max = 64;
-				} else
-					break;
-			}
+			cc = devpoll_watcher(manager);
 #elif defined(USE_SELECT)
-			LOCK(&manager->lock);
-			memmove(manager->read_fds_copy, manager->read_fds,
-				manager->fd_bufsize);
-			memmove(manager->write_fds_copy, manager->write_fds,
-				manager->fd_bufsize);
-			maxfd = manager->maxfd + 1;
-			UNLOCK(&manager->lock);
-
-			cc = select(maxfd, manager->read_fds_copy,
-				    manager->write_fds_copy, NULL, NULL);
+			cc = select_watcher(manager);
 #endif	/* USE_KQUEUE */
 
 			if (cc < 0 && !SOFT_ERROR(errno)) {
@@ -4319,52 +4377,20 @@ watcher(void *uap) {
 							   "failed"), strbuf);
 			}
 
-#if defined(USE_DEVPOLL) && defined(ISC_SOCKET_USE_POLLWATCH)
-			if (cc == 0) {
-				if (pollstate == poll_active)
-					pollstate = poll_checking;
-				else if (pollstate == poll_checking)
-					pollstate = poll_idle;
-			} else if (cc > 0) {
-				if (pollstate == poll_checking) {
-					/*
-					 * XXX: We'd like to use a more
-					 * verbose log level as it's actually an
-					 * unexpected event, but the kernel bug
-					 * reportedly happens pretty frequently
-					 * (and it can also be a false positive)
-					 * so it would be just too noisy.
-					 */
-					manager_log(manager,
-						    ISC_LOGCATEGORY_GENERAL,
-						    ISC_LOGMODULE_SOCKET,
-						    ISC_LOG_DEBUG(1),
-						    "unexpected POLL timeout");
-				}
-				pollstate = poll_active;
-			}
-#endif
 		} while (cc < 0);
 
 #if defined(USE_KQUEUE) || defined (USE_EPOLL) || defined (USE_DEVPOLL)
-		if (nevents == manager->nevents) {
-			/*
-			 * This is not an error, but something unexpected.  If this
-			 * happens, it may indicate the need for increasing
-			 * ISC_SOCKET_MAXEVENTS.
-			 */
-			manager_log(manager, ISC_LOGCATEGORY_GENERAL,
-				    ISC_LOGMODULE_SOCKET, ISC_LOG_INFO,
-				    "maximum number of FD events (%d) received",
-				    nevents);
-		}
-
-		have_ctlevent = process_fds(manager, manager->events, cc);
+		check_max_events(manager, cc);
+		swait.nevents = cc;
+		have_ctlevent = process_fds(manager, &swait);
 
 #elif defined(USE_SELECT)
-		have_ctlevent = process_fds(manager, maxfd,
+		swait.maxfd = maxfd;
+		have_ctlevent = process_fds(manager, &swait);
+#if 0
 			    manager->read_fds_copy,
 			    manager->write_fds_copy);
+#endif
 #endif
 		/*
 		 * Process reads on internal, control fd.
@@ -6609,12 +6635,10 @@ isc__socketmgr_dispatch(isc_socketmgr_t *manager0, isc_socketwait_t *swait) {
 		return (ISC_R_NOTFOUND);
 
 #if defined(USE_KQUEUE) || defined(USE_EPOLL) || defined(USE_DEVPOLL)
-	(void)process_fds(manager, manager->events, swait->nevents);
-	return (ISC_R_SUCCESS);
-#elif defined(USE_SELECT)
-	process_fds(manager, swait->maxfd, swait->readset, swait->writeset);
-	return (ISC_R_SUCCESS);
+	check_max_events(manager, swait->nevents);
 #endif
+	(void)process_fds(manager, &swait);
+	return (ISC_R_SUCCESS);
 }
 #endif /* USE_WATCHER_THREAD */
 
