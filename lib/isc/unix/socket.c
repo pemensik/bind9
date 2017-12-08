@@ -967,10 +967,9 @@ static int
 generic_addsocket_start(isc__socketmgr_t *manager, isc__socket_t *sock) {
 	int lockid = FDLOCK_ID(sock->fd);
 
-	LOCK(&sock->manager->fdlock[lockid]);
+	LOCK(&manager->fdlock[lockid]);
 	manager->fds[sock->fd] = sock;
 	manager->fdstate[sock->fd] = MANAGED;
-	manager->operations->add_socket(manager, sock);
 	return lockid;
 }
 
