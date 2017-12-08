@@ -1268,12 +1268,6 @@ epoll_watcher_time(isc__socketmgr_t *manager, int timeout)
 static int
 epoll_watcher(isc__socketmgr_t *manager) {
 	return epoll_watcher_time(manager, -1);
-#if 0
-	struct mgrprivate_epoll *priv = 
-		(struct mgrprivate_epoll *) manager->private;
-	return epoll_wait(priv->epoll_fd, priv->events,
-			priv->nevents, );
-#endif
 }
 
 static void
@@ -1866,33 +1860,11 @@ select_waitevents(isc___socketmgr_t *manager, struct timeval *tvp)
 static inline isc_result_t
 watch_fd(isc__socketmgr_t *manager, int fd, int msg) {
 	return manager->operations->watch_fd(manager, fd, msg);
-#if 0
-#ifdef USE_KQUEUE
-	return kqueue_watch_fd(manager, fd, msg);
-#elif defined(USE_EPOLL)
-	return epoll_watch_fd(manager, fd, msg);
-#elif defined(USE_DEVPOLL)
-	return devpoll_watch_fd(manager, fd, msg);
-#elif defined(USE_SELECT)
-	return select_watch_fd(manager, fd, msg);
-#endif
-#endif
 }
 
 static inline isc_result_t
 unwatch_fd(isc__socketmgr_t *manager, int fd, int msg) {
 	return manager->operations->unwatch_fd(manager, fd, msg);
-#if 0
-#ifdef USE_KQUEUE
-	return kqueue_unwatch_fd(manager, fd, msg);
-#elif defined(USE_EPOLL)
-	return epoll_unwatch_fd(manager, fd, msg);
-#elif defined(USE_DEVPOLL)
-	return devpoll_unwatch_fd(manager, fd, msg);
-#elif defined(USE_SELECT)
-	return select_unwatch_fd(manager, fd, msg);
-#endif
-#endif
 }
 
 static void
@@ -3034,11 +3006,6 @@ socketclose(isc__socketmgr_t *manager, isc__socket_t *sock, int fd) {
 	 * efficiently)
 	 */
 	manager->operations->close_socket(manager, fd);
-#if 0
-#ifdef USE_SELECT
-	select_socketclose(manager, fd);
-#endif	/* USE_SELECT */
-#endif
 }
 
 static void
@@ -3818,22 +3785,7 @@ socket_create(isc_socketmgr_t *manager0, int pf, isc_sockettype_t type,
 	 * there are no external references to it yet.
 	 */
 
-#if 0
-	lockid = FDLOCK_ID(sock->fd);
-	LOCK(&manager->fdlock[lockid]);
-	manager->fds[sock->fd] = sock;
-	manager->fdstate[sock->fd] = MANAGED;
-#endif
 	manager->operations->add_socket(manager, sock);
-#if 0
-#if defined(USE_EPOLL)
-	epoll_addsocket(manager, sock);
-#endif
-#ifdef USE_DEVPOLL
-	INSIST(sock->manager->fdpollinfo[sock->fd].want_read == 0 &&
-	       sock->manager->fdpollinfo[sock->fd].want_write == 0);
-#endif
-#endif
 
 	LOCK(&manager->lock);
 	ISC_LIST_APPEND(manager->socklist, sock, link);
@@ -3897,29 +3849,6 @@ isc__socket_open(isc_socket_t *sock0) {
 
 	if (result == ISC_R_SUCCESS) {
 		sock->manager->operations->add_socket(sock->manager, sock);
-#if 0
-		int lockid = FDLOCK_ID(sock->fd);
-
-		LOCK(&sock->manager->fdlock[lockid]);
-		sock->manager->fds[sock->fd] = sock;
-		sock->manager->fdstate[sock->fd] = MANAGED;
-		sock->manager->operations->addsocket(sock->manager, sock->fd);
-#if defined(USE_EPOLL)
-		epoll_addsocket(sock->manager, sock->fd);
-#endif
-#ifdef USE_DEVPOLL
-		INSIST(sock->manager->fdpollinfo[sock->fd].want_read == 0 &&
-		       sock->manager->fdpollinfo[sock->fd].want_write == 0);
-#endif
-		UNLOCK(&sock->manager->fdlock[lockid]);
-
-#ifdef USE_SELECT
-		LOCK(&sock->manager->lock);
-		if (sock->manager->maxfd < sock->fd)
-			sock->manager->maxfd = sock->fd;
-		UNLOCK(&sock->manager->lock);
-#endif
-#endif
 	}
 
 	return (result);
@@ -3967,28 +3896,10 @@ isc__socket_fdwatchcreate(isc_socketmgr_t *manager0, int fd, int flags,
 	 */
 
 	manager->operations->add_socket(manager, sock);
-#if 0
-	lockid = FDLOCK_ID(sock->fd);
-	LOCK(&manager->fdlock[lockid]);
-	manager->fds[sock->fd] = sock;
-	manager->fdstate[sock->fd] = MANAGED;
-#if defined(USE_EPOLL)
-	epoll_addsocket(manager, sock->fd);
-#endif
-	UNLOCK(&manager->fdlock[lockid]);
 
 	LOCK(&manager->lock);
 	ISC_LIST_APPEND(manager->socklist, sock, link);
-#ifdef USE_SELECT
-	if (manager->maxfd < sock->fd)
-		manager->maxfd = sock->fd;
-#endif
 	UNLOCK(&manager->lock);
-#else
-	LOCK(&manager->lock);
-	ISC_LIST_APPEND(manager->socklist, sock, link);
-	UNLOCK(&manager->lock);
-#endif
 
 	if (flags & ISC_SOCKFDWATCH_READ)
 		select_poke(sock->manager, sock->fd, SELECT_POKE_READ);
@@ -4545,24 +4456,8 @@ internal_accept(isc_task_t *me, isc_event_t *ev) {
 		}
 
 		manager->operations->add_socket(manager, NEWCONNSOCK(dev));
-#if 0
-		LOCK(&manager->fdlock[lockid]);
-		manager->fds[fd] = NEWCONNSOCK(dev);
-		manager->fdstate[fd] = MANAGED;
-#if defined(USE_EPOLL)
-		epoll_addsocket(manager, fd);
-#endif
-		UNLOCK(&manager->fdlock[lockid]);
 
 		LOCK(&manager->lock);
-
-#ifdef USE_SELECT
-		if (manager->maxfd < fd)
-			manager->maxfd = fd;
-#endif
-#else
-		LOCK(&manager->lock);
-#endif
 		socket_log(sock, &NEWCONNSOCK(dev)->peer_address, CREATION,
 			   isc_msgcat, ISC_MSGSET_SOCKET, ISC_MSG_ACCEPTEDCXN,
 			   "accepted connection, new socket %p",
@@ -4871,35 +4766,9 @@ check_write:
 
 }
 
-#if 0
-static void log_max_events(isc__socketmgr_t *manager, int nevents) {
-	manager_log(manager, ISC_LOGCATEGORY_GENERAL,
-		    ISC_LOGMODULE_SOCKET, ISC_LOG_INFO,
-		    "maximum number of FD events (%d) received",
-		    nevents);
-}
-
-static void check_max_events(isc__socketmgr_t *manager, int nevents) {
-	if (nevents == manager->nevents) {
-		log_max_events(manager, nevents);
-	}
-}
-#endif
-
 static isc_boolean_t
 process_fds(isc__socketmgr_t *manager) {
 	return manager->operations->process_fds(manager);
-#if 0
-#ifdef USE_KQUEUE
-	return kqueue_process_fds(manager, swait);
-#elif defined(USE_EPOLL)
-	return epoll_process_fds(manager, swait);
-#elif defined(USE_DEVPOLL)
-	return devpoll_process_fds(manager, swait);
-#elif defined(USE_SELECT)
-	return select_process_fds(manager, swait);
-#endif
-#endif
 }
 
 #ifdef USE_WATCHER_THREAD
@@ -4955,19 +4824,6 @@ watcher(void *uap) {
 	isc__socketmgr_t *manager = uap;
 	isc_boolean_t done, have_ctlevent;
 	int cc;
-#ifdef USE_KQUEUE
-	const char *fnname = "kevent()";
-#elif defined (USE_EPOLL)
-	const char *fnname = "epoll_wait()";
-#elif defined(USE_DEVPOLL)
-	const char *fnname = "ioctl(DP_POLL)";
-#if defined(ISC_SOCKET_USE_POLLWATCH)
-	pollstate_t pollstate = poll_idle;
-#endif
-#elif defined (USE_SELECT)
-	const char *fnname = "select()";
-	int maxfd;
-#endif
 	char strbuf[ISC_STRERRORSIZE];
 
 	REQUIRE(manager->operations != NULL);
@@ -5051,20 +4907,7 @@ static isc_result_t
 setup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 	isc_result_t result;
 
-	result = manager->operations->setup_watcher(mctx, manager);
-#if 0
-#ifdef USE_KQUEUE
-	result = kqueue_setup_watcher(mctx, manager);
-#elif defined(USE_EPOLL)
-	result = epoll_setup_watcher(mctx, manager);
-#elif defined(USE_DEVPOLL)
-	result = devpoll_setup_watcher(mctx, manager);
-#elif defined(USE_SELECT)
-	result = select_setup_watcher(mctx, manager);
-#endif	/* USE_KQUEUE */
-#endif
-
-	return (ISC_R_SUCCESS);
+	return manager->operations->setup_watcher(mctx, manager);
 }
 
 static void
@@ -5082,17 +4925,6 @@ cleanup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 #endif	/* USE_WATCHER_THREAD */
 
 	manager->operations->cleanup_watcher(mctx, manager);
-#if 0
-#ifdef USE_KQUEUE
-	kqueue_cleanup_watcher(mctx, manager);
-#elif defined(USE_EPOLL)
-	epoll_cleanup_watcher(mctx, manager);
-#elif defined(USE_DEVPOLL)
-	devpoll_cleanup_watcher(mctx, manager);
-#elif defined(USE_SELECT)
-	select_cleanup_watcher(mctx, manager);
-#endif	/* USE_KQUEUE */
-#endif
 }
 
 static void
