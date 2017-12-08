@@ -254,6 +254,13 @@ static char one[] = "1";
 static char two[] = "2";
 static char xso1[] = "so1";
 static char xso2[] = "so2";
+#if 0
+static char target[] = "204.152.184.97";
+static unsigned target_port = 80;
+#else
+static char target[] = "127.0.0.1";
+static unsigned target_port = 631;
+#endif
 
 int
 main(int argc, char *argv[]) {
@@ -355,11 +362,11 @@ main(int argc, char *argv[]) {
 	 * Why not.  :)
 	 */
 	so2 = NULL;
-	ina.s_addr = inet_addr("204.152.184.97");
+	ina.s_addr = inet_addr(target);
 	if (0 && pf == PF_INET6)
-		isc_sockaddr_v6fromin(&sockaddr, &ina, 80);
+		isc_sockaddr_v6fromin(&sockaddr, &ina, target_port);
 	else
-		isc_sockaddr_fromin(&sockaddr, &ina, 80);
+		isc_sockaddr_fromin(&sockaddr, &ina, target_port);
 	RUNTIME_CHECK(isc_socket_create(socketmgr, isc_sockaddr_pf(&sockaddr),
 					isc_sockettype_tcp,
 					&so2) == ISC_R_SUCCESS);
