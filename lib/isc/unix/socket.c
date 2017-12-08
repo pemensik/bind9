@@ -492,7 +492,7 @@ struct isc__socketmgr {
 #endif
 	/* custom data per wait task, socketmgr_* */
 	void			*private;
-	socketmgr_operations_t	*operations;
+	const socketmgr_operations_t	*operations;
 
 	/* Locked by manager lock. */
 	ISC_LIST(isc__socket_t)	socklist;
@@ -1324,7 +1324,7 @@ epoll_create_private(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 	priv = isc_mem_get(mctx, sizeof(struct mgrprivate_epoll));
 	if (priv == NULL)
 		return (ISC_R_NOMEMORY);
-	memset(&priv, 0, sizeof(struct mgrprivate_epoll));
+	memset(priv, 0, sizeof(struct mgrprivate_epoll));
 
 	priv->nevents = ISC_SOCKET_MAXEVENTS;
 	priv->events = isc_mem_get(mctx, sizeof(struct epoll_event) *
@@ -1343,6 +1343,7 @@ epoll_create_private(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 		return (ISC_R_NOMEMORY);
 	}
 	memset(priv->epoll_events, 0, manager->maxsocks * sizeof(uint32_t));
+	manager->private = priv;
 	return (ISC_R_SUCCESS);
 }
 
@@ -4905,8 +4906,6 @@ log_errno_failure(const char *function, const char *file, int line) {
 
 static isc_result_t
 setup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
-	isc_result_t result;
-
 	return manager->operations->setup_watcher(mctx, manager);
 }
 
@@ -5066,7 +5065,7 @@ isc__socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 	/*
 	 * Set up initial state for the select loop
 	 */
-	result = manager->operations->setup_watcher(mctx, manager);
+	result = setup_watcher(mctx, manager);
 	if (result != ISC_R_SUCCESS)
 		goto cleanup;
 
