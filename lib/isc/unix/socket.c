@@ -390,7 +390,7 @@ struct socketmgr_operations {
 	void         (*destroy_private)(isc_mem_t *mctx, isc__socketmgr_t *mgr);
 	isc_result_t (*watch_fd)(isc__socketmgr_t *manager, int fd, int msg);
 	isc_result_t (*unwatch_fd)(isc__socketmgr_t *manager, int fd, int msg);
-	isc_boolean_t (*process_fds)(isc__socketmgr_t *manager);
+	isc_boolean_t (*process_fds)(isc__socketmgr_t *manager, int nevents);
 	int (*watcher)(isc__socketmgr_t *manager);
 	int (*waitevents)(isc__socketmgr_t *manager, struct timeval *tvp);
 	isc_result_t (*setup_watcher)(isc_mem_t *mctx, isc__socketmgr_t *manager);
@@ -1046,18 +1046,18 @@ kqueue_unwatch_fd(isc__socketmgr_t *manager, int fd, int msg) {
 }
 
 static isc_boolean_t
-kqueue_process_fds(isc__socketmgr_t *manager) {
+kqueue_process_fds(isc__socketmgr_t *manager, int nevents) {
 	int i;
 	isc_boolean_t readable, writable;
 	isc_boolean_t have_ctlevent = ISC_FALSE;
 	struct socketwait_events *s = (struct socketwait_events *) swait;
 	struct kevent *events = manager->events;
 
-	if (priv->last_events == priv->nevents) {
+	if (nevents == priv->nevents) {
 		manager_log(manager, ISC_LOGCATEGORY_GENERAL,
 			    ISC_LOGMODULE_SOCKET, ISC_LOG_INFO,
 			    "maximum number of FD events (%d) received",
-			    priv->last_events);
+			    nevents);
 	}
 
 	for (i = 0; i < s->nevents; i++) {
@@ -1209,7 +1209,7 @@ epoll_addsocket(isc__socketmgr_t *manager, isc__socket_t *sock) {
 }
 
 static isc_boolean_t
-epoll_process_fds(isc__socketmgr_t *manager)
+epoll_process_fds(isc__socketmgr_t *manager, int nevents)
 {
 	int i;
 	isc_boolean_t have_ctlevent = ISC_FALSE;
@@ -1219,14 +1219,14 @@ epoll_process_fds(isc__socketmgr_t *manager)
 
 	REQUIRE(priv != NULL);
 
-	if (priv->last_events == priv->nevents) {
+	if (nevents == priv->nevents) {
 		manager_log(manager, ISC_LOGCATEGORY_GENERAL,
 			    ISC_LOGMODULE_SOCKET, ISC_LOG_INFO,
 			    "maximum number of FD events (%d) received",
-			    priv->last_events);
+			    nevents);
 	}
 
-	for (i = 0; i < priv->last_events; i++) {
+	for (i = 0; i < nevents; i++) {
 		REQUIRE(events[i].data.fd < (int)manager->maxsocks);
 #ifdef USE_WATCHER_THREAD
 		if (events[i].data.fd == manager->pipe_fds[0]) {
@@ -1259,9 +1259,10 @@ epoll_watcher_time(isc__socketmgr_t *manager, int timeout)
 {
 	struct mgrprivate_epoll *priv = 
 		(struct mgrprivate_epoll *) manager->private;
-	return epoll_wait(priv->epoll_fd,
+	priv->last_events = epoll_wait(priv->epoll_fd,
 					   priv->events,
 					   priv->nevents, timeout);
+	return priv->last_events;
 }
 
 static int
@@ -1314,6 +1315,7 @@ epoll_waitevents(isc__socketmgr_t *manager, struct timeval *tvp)
 	timeout = timeval_totimeout(tvp);
 	return epoll_watcher_time(manager, timeout);
 }
+
 static isc_result_t
 epoll_create_private(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 	struct mgrprivate_epoll *priv;
@@ -1462,20 +1464,20 @@ devpoll_addsocket(isc__socketmgr_t *manager, isc__socket_t *sock) {
 }
 
 static isc_boolean_t
-devpoll_process_fds(isc__socketmgr_t *manager) {
+devpoll_process_fds(isc__socketmgr_t *manager, int nevents) {
 	int i;
 	isc_boolean_t have_ctlevent = ISC_FALSE;
 	struct pollfd *events = manager->events;
 	struct socketwait_events *s = (struct socketwait_events *) swait;
 
-	if (priv->last_events == priv->nevents) {
+	if (nevents == priv->nevents) {
 		manager_log(manager, ISC_LOGCATEGORY_GENERAL,
 			    ISC_LOGMODULE_SOCKET, ISC_LOG_INFO,
 			    "maximum number of FD events (%d) received",
-			    priv->last_events);
+			    nevents);
 	}
 
-	for (i = 0; i < priv->last_events; i++) {
+	for (i = 0; i < nevents; i++) {
 		REQUIRE(events[i].fd < (int)manager->maxsocks);
 #ifdef USE_WATCHER_THREAD
 		if (events[i].fd == manager->pipe_fds[0]) {
@@ -4766,9 +4768,10 @@ check_write:
 
 }
 
+/* FIXME: nevents number may be thread specific */
 static isc_boolean_t
-process_fds(isc__socketmgr_t *manager) {
-	return manager->operations->process_fds(manager);
+process_fds(isc__socketmgr_t *manager, int nevents) {
+	return manager->operations->process_fds(manager, nevents);
 }
 
 #ifdef USE_WATCHER_THREAD
@@ -4847,7 +4850,7 @@ watcher(void *uap) {
 
 		} while (cc < 0);
 
-		have_ctlevent = process_fds(manager);
+		have_ctlevent = process_fds(manager, cc);
 		/*
 		 * Process reads on internal, control fd.
 		 */
@@ -6825,7 +6828,7 @@ isc__socketmgr_dispatch(isc_socketmgr_t *manager0, isc_socketwait_t *swait) {
 #if defined(USE_KQUEUE) || defined(USE_EPOLL) || defined(USE_DEVPOLL)
 	check_max_events(manager, swait->nevents);
 #endif
-	(void)process_fds(manager, &swait);
+	(void)process_fds(manager, swait->nevents);
 	return (ISC_R_SUCCESS);
 }
 #endif /* USE_WATCHER_THREAD */
