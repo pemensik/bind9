@@ -1274,9 +1274,10 @@ static void
 epoll_cleanup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 	struct mgrprivate_epoll *priv = 
 		(struct mgrprivate_epoll *) manager->private;
+
+	REQUIRE(priv != NULL);
+
 	close(priv->epoll_fd);
-	isc_mem_put(mctx, priv->events,
-		    sizeof(struct epoll_event) * priv->nevents);
 }
 
 static isc_result_t
@@ -1285,11 +1286,8 @@ epoll_setup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 	struct mgrprivate_epoll *priv = 
 		(struct mgrprivate_epoll *) manager->private;
 
-	priv->nevents = ISC_SOCKET_MAXEVENTS;
-	priv->events = isc_mem_get(mctx, sizeof(struct epoll_event) *
-				      priv->nevents);
-	if (priv->events == NULL)
-		return (ISC_R_NOMEMORY);
+	REQUIRE(priv != NULL);
+
 	priv->epoll_fd = epoll_create(priv->nevents);
 	if (priv->epoll_fd == -1) {
 		result = isc__errno2result(errno);
@@ -5104,6 +5102,10 @@ cleanup:
 	(void)close(manager->pipe_fds[1]);
 #endif	/* USE_WATCHER_THREAD */
 
+	if (manager->private != NULL && manager->operations != NULL) {
+		manager->operations->destroy_private(manager->mctx, manager);
+	}
+
 #ifdef USE_WATCHER_THREAD
 cleanup_condition:
 	(void)isc_condition_destroy(&manager->shutdown_ok);
@@ -5122,11 +5124,6 @@ free_manager:
 		isc_mem_put(mctx, manager->fdlock,
 			    FDLOCK_COUNT * sizeof(isc_mutex_t));
 	}
-#if defined(USE_EPOLL)
-	if (manager->private != NULL) {
-		epoll_destroy_private(mctx, manager);
-	}
-#endif
 	if (manager->fdstate != NULL) {
 		isc_mem_put(mctx, manager->fdstate,
 			    manager->maxsocks * sizeof(int));
@@ -5240,11 +5237,10 @@ isc__socketmgr_destroy(isc_socketmgr_t **managerp) {
 		if (manager->fdstate[i] == CLOSE_PENDING) /* no need to lock */
 			(void)close(i);
 
-#if defined(USE_EPOLL)
-	if (manager->private != NULL) {
-		epoll_destroy_private(mctx, manager);
+	if (manager->private != NULL && manager->operations != NULL) {
+		manager->operations->destroy_private(manager->mctx, manager);
 	}
-#endif
+
 	isc_mem_put(manager->mctx, manager->fds,
 		    manager->maxsocks * sizeof(isc__socket_t *));
 	isc_mem_put(manager->mctx, manager->fdstate,
