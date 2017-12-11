@@ -114,9 +114,8 @@ typedef struct {
 	unsigned int want_read : 1,
 		want_write : 1;
 } pollinfo_t;
-#else
-#define USE_SELECT
 #endif	/* ISC_PLATFORM_HAVEKQUEUE */
+#define USE_SELECT
 
 #if defined(USE_KQUEUE) || defined(USE_EPOLL) || defined(USE_DEVPOLL)
 struct socketwait_events {
@@ -1130,6 +1129,9 @@ kqueue_unwatch_fd(isc__socketmgr_t *manager, int fd, int msg) {
 
 	return (result);
 }
+
+const char kqueue_fnname[] = "kevent()";
+
 #elif defined(USE_EPOLL)
 static isc_result_t
 epoll_watch_fd(isc__socketmgr_t *manager, int fd, int msg) {
@@ -1664,68 +1666,90 @@ devpoll_waitevents(isc___socketmgr_t *manager, struct timeval *tvp,
 	return n;
 }
 
-#elif defined(USE_SELECT)
+const char devpoll_fnname[] = "ioctl(DP_POLL)";
+
+#endif /* USE_DEVPOLL */
+
+#ifdef USE_SELECT
 static isc_result_t
 select_watch_fd(isc__socketmgr_t *manager, int fd, int msg) {
+	struct mgrprivate_select *priv =
+		(struct mgrprivate_select *) manager->private;
+
+	REQUIRE(priv != NULL);
+
 	LOCK(&manager->lock);
 	if (msg == SELECT_POKE_READ)
-		FD_SET(fd, manager->read_fds);
+		FD_SET(fd, priv->read_fds);
 	if (msg == SELECT_POKE_WRITE)
-		FD_SET(fd, manager->write_fds);
+		FD_SET(fd, priv->write_fds);
 	UNLOCK(&manager->lock);
 
-	return (result);
+	return (ISC_R_SUCCESS);
 }
 
 static isc_result_t
 select_unwatch_fd(isc__socketmgr_t *manager, int fd, int msg) {
-	isc_result_t result = ISC_R_SUCCESS;
+	struct mgrprivate_select *priv =
+		(struct mgrprivate_select *) manager->private;
+
+	REQUIRE(priv != NULL);
 
 	LOCK(&manager->lock);
 	if (msg == SELECT_POKE_READ)
-		FD_CLR(fd, manager->read_fds);
+		FD_CLR(fd, priv->read_fds);
 	else if (msg == SELECT_POKE_WRITE)
-		FD_CLR(fd, manager->write_fds);
+		FD_CLR(fd, priv->write_fds);
 	UNLOCK(&manager->lock);
 
-	return (result);
+	return (ISC_R_SUCCESS);
 }
 
 static void
 select_addsocket(isc__socketmgr_t *manager, isc__socket_t *sock) {
 	int lockid;
+	struct mgrprivate_select *priv =
+		(struct mgrprivate_select *) manager->private;
+
+	REQUIRE(priv != NULL);
 
 	lockid = generic_addsocket_start(manager, sock);
 	generic_addsocket_end(manager, lockid);
 	
 	LOCK(&manager->lock);
-	if (manager->maxfd < sock->fd)
-		manager->maxfd = sock->fd;
+	if (priv->maxfd < sock->fd)
+		priv->maxfd = sock->fd;
 	UNLOCK(&manager->lock);
 }
 
 static void
-select_socketsocket(isc__socketmgr_t *manager, int fd)
+select_closesocket(isc__socketmgr_t *manager, int fd)
 {
-	LOCK(&manager->lock);
-	if (manager->maxfd == fd) {
-		int i;
+	struct mgrprivate_select *priv =
+		(struct mgrprivate_select *) manager->private;
 
-		manager->maxfd = 0;
+	REQUIRE(priv != NULL);
+
+	LOCK(&manager->lock);
+	if (priv->maxfd == fd) {
+		int i;
+		int lockid;
+
+		priv->maxfd = 0;
 		for (i = fd - 1; i >= 0; i--) {
 			lockid = FDLOCK_ID(i);
 
 			LOCK(&manager->fdlock[lockid]);
 			if (manager->fdstate[i] == MANAGED) {
-				manager->maxfd = i;
+				priv->maxfd = i;
 				UNLOCK(&manager->fdlock[lockid]);
 				break;
 			}
 			UNLOCK(&manager->fdlock[lockid]);
 		}
 #ifdef ISC_PLATFORM_USETHREADS
-		if (manager->maxfd < manager->pipe_fds[0])
-			manager->maxfd = manager->pipe_fds[0];
+		if (priv->maxfd < manager->pipe_fds[0])
+			priv->maxfd = manager->pipe_fds[0];
 #endif
 	}
 
@@ -1733,97 +1757,120 @@ select_socketsocket(isc__socketmgr_t *manager, int fd)
 }
 
 static int
-select_watcher(isc__socketmgr_t *manager) {
+select_watcher_time(isc__socketmgr_t *manager, struct timeval *tvp) {
 	int maxfd;
+	struct mgrprivate_select *priv =
+		(struct mgrprivate_select *) manager->private;
+
+	REQUIRE(priv != NULL);
 
 	LOCK(&manager->lock);
-	memmove(manager->read_fds_copy, manager->read_fds,
-		manager->fd_bufsize);
-	memmove(manager->write_fds_copy, manager->write_fds,
-		manager->fd_bufsize);
-	maxfd = manager->maxfd + 1;
+	memmove(priv->read_fds_copy, priv->read_fds,
+		priv->fd_bufsize);
+	memmove(priv->write_fds_copy, priv->write_fds,
+		priv->fd_bufsize);
+	maxfd = priv->maxfd + 1;
 	UNLOCK(&manager->lock);
 
-	return select(maxfd, manager->read_fds_copy,
-		    manager->write_fds_copy, NULL, NULL);
+	return select(maxfd, priv->read_fds_copy,
+		    priv->write_fds_copy, NULL, tvp);
+}
+
+static int
+select_watcher(isc__socketmgr_t *manager) {
+	return select_watcher_time(manager, NULL);
 }
 
 static void
 select_cleanup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
-	if (manager->read_fds != NULL)
-		isc_mem_put(mctx, manager->read_fds, manager->fd_bufsize);
-	if (manager->read_fds_copy != NULL)
-		isc_mem_put(mctx, manager->read_fds_copy, manager->fd_bufsize);
-	if (manager->write_fds != NULL)
-		isc_mem_put(mctx, manager->write_fds, manager->fd_bufsize);
-	if (manager->write_fds_copy != NULL)
-		isc_mem_put(mctx, manager->write_fds_copy, manager->fd_bufsize);
+	struct mgrprivate_select *priv =
+		(struct mgrprivate_select *) manager->private;
+
+	REQUIRE(priv != NULL);
+
+	if (priv->read_fds != NULL)
+		isc_mem_put(mctx, priv->read_fds, priv->fd_bufsize);
+	if (priv->read_fds_copy != NULL)
+		isc_mem_put(mctx, priv->read_fds_copy, priv->fd_bufsize);
+	if (priv->write_fds != NULL)
+		isc_mem_put(mctx, priv->write_fds, priv->fd_bufsize);
+	if (priv->write_fds_copy != NULL)
+		isc_mem_put(mctx, priv->write_fds_copy, priv->fd_bufsize);
 }
 
 static isc_result_t
 select_setup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
+	struct mgrprivate_select *priv =
+		(struct mgrprivate_select *) manager->private;
+
+	REQUIRE(priv != NULL);
+
 #if ISC_SOCKET_MAXSOCKETS > FD_SETSIZE
 	/*
 	 * Note: this code should also cover the case of MAXSOCKETS <=
 	 * FD_SETSIZE, but we separate the cases to avoid possible portability
 	 * issues regarding howmany() and the actual representation of fd_set.
 	 */
-	manager->fd_bufsize = howmany(manager->maxsocks, NFDBITS) *
+	priv->fd_bufsize = howmany(manager->maxsocks, NFDBITS) *
 		sizeof(fd_mask);
 #else
-	manager->fd_bufsize = sizeof(fd_set);
+	priv->fd_bufsize = sizeof(fd_set);
 #endif
 
-	manager->read_fds = NULL;
-	manager->read_fds_copy = NULL;
-	manager->write_fds = NULL;
-	manager->write_fds_copy = NULL;
+	priv->read_fds = NULL;
+	priv->read_fds_copy = NULL;
+	priv->write_fds = NULL;
+	priv->write_fds_copy = NULL;
 
-	manager->read_fds = isc_mem_get(mctx, manager->fd_bufsize);
-	if (manager->read_fds != NULL)
-		manager->read_fds_copy = isc_mem_get(mctx, manager->fd_bufsize);
-	if (manager->read_fds_copy != NULL)
-		manager->write_fds = isc_mem_get(mctx, manager->fd_bufsize);
-	if (manager->write_fds != NULL) {
-		manager->write_fds_copy = isc_mem_get(mctx,
-						      manager->fd_bufsize);
+	priv->read_fds = isc_mem_get(mctx, priv->fd_bufsize);
+	if (priv->read_fds != NULL)
+		priv->read_fds_copy = isc_mem_get(mctx, priv->fd_bufsize);
+	if (priv->read_fds_copy != NULL)
+		priv->write_fds = isc_mem_get(mctx, priv->fd_bufsize);
+	if (priv->write_fds != NULL) {
+		priv->write_fds_copy = isc_mem_get(mctx,
+						      priv->fd_bufsize);
 	}
-	if (manager->write_fds_copy == NULL) {
-		if (manager->write_fds != NULL) {
-			isc_mem_put(mctx, manager->write_fds,
-				    manager->fd_bufsize);
+	if (priv->write_fds_copy == NULL) {
+		if (priv->write_fds != NULL) {
+			isc_mem_put(mctx, priv->write_fds,
+				    priv->fd_bufsize);
 		}
-		if (manager->read_fds_copy != NULL) {
-			isc_mem_put(mctx, manager->read_fds_copy,
-				    manager->fd_bufsize);
+		if (priv->read_fds_copy != NULL) {
+			isc_mem_put(mctx, priv->read_fds_copy,
+				    priv->fd_bufsize);
 		}
-		if (manager->read_fds != NULL) {
-			isc_mem_put(mctx, manager->read_fds,
-				    manager->fd_bufsize);
+		if (priv->read_fds != NULL) {
+			isc_mem_put(mctx, priv->read_fds,
+				    priv->fd_bufsize);
 		}
 		return (ISC_R_NOMEMORY);
 	}
-	memset(manager->read_fds, 0, manager->fd_bufsize);
-	memset(manager->write_fds, 0, manager->fd_bufsize);
+	memset(priv->read_fds, 0, priv->fd_bufsize);
+	memset(priv->write_fds, 0, priv->fd_bufsize);
 
 #ifdef USE_WATCHER_THREAD
 	(void)watch_ctlfd(manager);
-	manager->maxfd = manager->pipe_fds[0];
+	priv->maxfd = manager->pipe_fds[0];
 #else /* USE_WATCHER_THREAD */
-	manager->maxfd = 0;
+	priv->maxfd = 0;
 #endif /* USE_WATCHER_THREAD */
 	return (ISC_R_SUCCESS);
 }
 
 static isc_boolean_t
-select_process_fds(isc__socketmgr_t *manager)
+select_process_fds(isc__socketmgr_t *manager, int nevents)
 {
 	int i;
-	struct mgrpriv_select *priv = (struct mgrpriv_select *) manager->private;
+	int maxfd;
+	struct mgrprivate_select *priv =
+		(struct mgrprivate_select *) manager->private;
 
+	UNUSED(nevents);
+	REQUIRE(priv != NULL);
 	REQUIRE(priv->maxfd <= (int)manager->maxsocks);
 
-	for (i = 0; i < priv->maxfd; i++) {
+	for (i = 0; i < priv->maxfd+1; i++) {
 #ifdef USE_WATCHER_THREAD
 		if (i == manager->pipe_fds[0] || i == manager->pipe_fds[1])
 			continue;
@@ -1831,26 +1878,60 @@ select_process_fds(isc__socketmgr_t *manager)
 		process_fd(manager, i, FD_ISSET(i, priv->read_fds_copy),
 			   FD_ISSET(i, priv->write_fds_copy));
 	}
-		/*
-		 * Process reads on internal, control fd.
-		 */
-	return (ISC_TF(FD_ISSET(ctlfd, priv->read_fds_copy)));
+	/*
+	 * Process reads on internal, control fd.
+	 */
+	return (ISC_TF(FD_ISSET(manager->pipe_fds[0], priv->read_fds_copy)));
 }
 
 static int
-select_waitevents(isc___socketmgr_t *manager, struct timeval *tvp)
+select_waitevents(isc__socketmgr_t *manager, struct timeval *tvp)
 {
-	int n = 0;
-	struct socketwait_select *swait = (struct socketwait_select *swaitp);
-	struct mgrprivate_select *priv = (struct mgrprivate_select *) manager->private;
-
-	memmove(priv->read_fds_copy, priv->read_fds, priv->fd_bufsize);
-	memmove(priv->write_fds_copy, priv->write_fds,
-		priv->fd_bufsize);
-
-	return select(priv->maxfd + 1, priv->read_fds_copy,
-		   priv->write_fds_copy, NULL, tvp);
+	return select_watcher_time(manager, tvp);
 }
+
+static isc_result_t
+select_create_private(isc_mem_t *mctx, isc__socketmgr_t *manager) {
+	struct mgrprivate_select *priv;
+
+	REQUIRE(manager->private == NULL);
+
+	priv = isc_mem_get(mctx, sizeof(struct mgrprivate_select));
+	if (priv == NULL)
+		return (ISC_R_NOMEMORY);
+	memset(priv, 0, sizeof(struct mgrprivate_select));
+	/* FIXME: select_setup_watcher allocates all buffers.
+	 * Only one allocation function for a implementation should be done. */
+	manager->private = priv;
+	return (ISC_R_SUCCESS);
+}
+
+static void
+select_destroy_private(isc_mem_t *mctx, isc__socketmgr_t *manager) {
+	struct mgrpriv_select *priv =
+		(struct mgrpriv_select *) manager->private;
+
+	if (priv != NULL)
+		isc_mem_put(mctx, priv, sizeof(struct mgrprivate_select));
+	manager->private = NULL;
+}
+
+static const socketmgr_operations_t select_operations =
+{
+	&select_create_private,
+	&select_destroy_private,
+	&select_watch_fd,
+	&select_unwatch_fd,
+	&select_process_fds,
+	&select_watcher,
+	&select_waitevents,
+	&select_setup_watcher,
+	&select_cleanup_watcher,
+	&select_addsocket,
+	&select_closesocket,
+	"select()",
+};
+
 #endif /* USE_SELECT */
 
 static inline isc_result_t
@@ -4762,7 +4843,6 @@ check_write:
 
 }
 
-/* FIXME: nevents number may be thread specific */
 static isc_boolean_t
 process_fds(isc__socketmgr_t *manager, int nevents) {
 	return manager->operations->process_fds(manager, nevents);
@@ -6781,7 +6861,8 @@ isc__socketmgr_waitevents(isc_socketmgr_t *manager0, struct timeval *tvp,
 	isc__socketmgr_t *manager = (isc__socketmgr_t *)manager0;
 	int n;
 
-	REQUIRE(swaitp != NULL && *swaitp == NULL);
+	REQUIRE(swaitp == NULL || swaitp != NULL && *swaitp == NULL);
+	REQUIRE(manager->operations != NULL);
 
 #ifdef USE_SHARED_MANAGER
 	if (manager == NULL)
@@ -6790,6 +6871,8 @@ isc__socketmgr_waitevents(isc_socketmgr_t *manager0, struct timeval *tvp,
 	if (manager == NULL)
 		return (0);
 
+	return manager->operations->waitevents(manager, tvp);
+#if 0
 #ifdef USE_KQUEUE
 	n = swait_private.nevents = kqueue_waitevents(manager, tvp, &swait_private);
 #elif defined(USE_EPOLL)
@@ -6802,6 +6885,7 @@ isc__socketmgr_waitevents(isc_socketmgr_t *manager0, struct timeval *tvp,
 
 	*swaitp = &swait_private;
 	return (n);
+#endif
 }
 
 isc_result_t
