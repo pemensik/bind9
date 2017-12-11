@@ -405,7 +405,6 @@ typedef struct socketmgr_operations socketmgr_operations_t;
 struct mgrprivate_kqueue {
 	int			kqueue_fd;
 	int			nevents;
-	int			last_events;
 	struct kevent		*events;
 };
 #endif
@@ -414,7 +413,6 @@ struct mgrprivate_kqueue {
 struct mgrprivate_epoll {
 	int			epoll_fd;
 	int			nevents;
-	int			last_events;
 	struct epoll_event	*events;
 	uint32_t		*epoll_events;
 };
@@ -426,7 +424,6 @@ struct mgrprivate_devpoll {
 	isc_resourcevalue_t	open_max;
 	unsigned int		calls;
 	int			nevents;
-	int			last_events;
 	struct pollfd		*events;
 	pollinfo_t		*fdpollinfo;
 };
@@ -1259,10 +1256,9 @@ epoll_watcher_time(isc__socketmgr_t *manager, int timeout)
 {
 	struct mgrprivate_epoll *priv = 
 		(struct mgrprivate_epoll *) manager->private;
-	priv->last_events = epoll_wait(priv->epoll_fd,
-					   priv->events,
-					   priv->nevents, timeout);
-	return priv->last_events;
+	return epoll_wait(priv->epoll_fd,
+			  priv->events,
+			  priv->nevents, timeout);
 }
 
 static int
