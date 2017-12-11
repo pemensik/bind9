@@ -15,6 +15,8 @@
 #include <unistd.h>
 
 #include <isc/mem.h>
+#include <isc/log.h>
+#include <isc/lib.h>
 #include <isc/print.h>
 #include <isc/socket.h>
 #include <isc/string.h>
@@ -277,6 +279,8 @@ main(int argc, char *argv[]) {
 	struct in6_addr in6a;
 	isc_result_t result;
 	int pf;
+	isc_log_t *lctx = NULL;
+	isc_logconfig_t *lcfg = NULL;
 
 	if (argc > 1) {
 		workers = atoi(argv[1]);
@@ -293,11 +297,20 @@ main(int argc, char *argv[]) {
 	else
 		pf = PF_INET;
 
+
+	isc_lib_register();
+
 	/*
 	 * EVERYTHING needs a memory context.
 	 */
 	mctx = NULL;
 	RUNTIME_CHECK(isc_mem_create(0, 0, &mctx) == ISC_R_SUCCESS);
+
+	lctx = NULL;
+	lcfg = NULL;
+	RUNTIME_CHECK(isc_log_create(mctx, &lctx, &lcfg) == ISC_R_SUCCESS);
+	isc_log_setdebuglevel(lctx, 20);
+	isc_log_setcontext(lctx);
 
 	/*
 	 * The task manager is independent (other than memory context)
@@ -385,7 +398,7 @@ main(int argc, char *argv[]) {
 	 * Wait a short while.
 	 */
 #ifndef WIN32
-	sleep(10);
+	sleep(60);
 #else
 	Sleep(10000);
 #endif
