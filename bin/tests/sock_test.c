@@ -298,7 +298,9 @@ main(int argc, char *argv[]) {
 		pf = PF_INET;
 
 
+#if 1
 	isc_lib_register();
+#endif
 
 	/*
 	 * EVERYTHING needs a memory context.
@@ -411,6 +413,10 @@ main(int argc, char *argv[]) {
 
 	fprintf(stderr, "Destroying task manager\n");
 	isc_taskmgr_destroy(&manager);
+
+	fprintf(stderr, "Destroying log context\n");
+	isc_log_setcontext(NULL);
+	isc_log_destroy(&lctx);
 
 	isc_mem_stats(mctx, stdout);
 	isc_mem_destroy(&mctx);
