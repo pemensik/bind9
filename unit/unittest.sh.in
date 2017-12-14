@@ -2,9 +2,11 @@
 
 PATH="@ATFBIN@:${PATH}"
 export PATH
+ATFRUN=$(which atf-run 2>/dev/null)
+KYUA=$(which kyua 2>/dev/null)
 
 status=0
-if [ -n "@ATFBIN@" -a -f Atffile ]
+if [ -n "@ATFBIN@" -a -x "$ATFRUN" -a -f Atffile ]
 then
 	echo "S:unit:`date`"
         echo "T:unit:1:A"
@@ -18,6 +20,26 @@ then
 	if [ $status -eq 0 ]
 	then
 		rm -f atf.out
+		echo R:PASS
+	else
+		echo R:FAIL
+	fi
+	echo "E:unit:`date`"
+fi
+if [ -x "$KYUA" -a -f Kyuafile ]
+then
+	echo "S:unit:`date`"
+        echo "T:unit:1:A"
+	echo "I: unit tests"
+	kyua --logfile kyua.log test
+	status=$?
+
+        # | cat is there to force non-fancy output
+	kyua report
+
+	if [ $status -eq 0 ]
+	then
+		rm -f kyua.log
 		echo R:PASS
 	else
 		echo R:FAIL
