@@ -1298,6 +1298,7 @@ epoll_cleanup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 		(struct mgrprivate_epoll *) manager->private;
 
 	REQUIRE(priv != NULL);
+	UNUSED(mctx);
 
 	close(priv->epoll_fd);
 }
@@ -1883,7 +1884,6 @@ static isc_boolean_t
 select_process_fds(isc__socketmgr_t *manager, int nevents)
 {
 	int i;
-	int maxfd;
 	struct mgrprivate_select *priv =
 		(struct mgrprivate_select *) manager->private;
 
