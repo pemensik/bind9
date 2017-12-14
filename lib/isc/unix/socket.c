@@ -5025,12 +5025,16 @@ cleanup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 
 static void
 setup_operations(isc__socketmgr_t *manager) {
+#if 0
 #ifdef USE_SELECT
 	/* For client applications, most simple implementation is enough. */
 	if (!isc_bind9) {
 		manager->operations = &select_operations;
 		return;
 	}
+#endif
+#else
+	(void)select_operations;
 #endif
 #ifdef USE_KQUEUE
 	manager->operations = &kqueue_operations;
