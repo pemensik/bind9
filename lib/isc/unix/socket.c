@@ -117,11 +117,10 @@ typedef struct {
 #endif	/* ISC_PLATFORM_HAVEKQUEUE */
 #define USE_SELECT
 
-#if defined(USE_KQUEUE) || defined(USE_EPOLL) || defined(USE_DEVPOLL)
-struct socketwait_events {
+struct socketwait {
 	int nevents;
 };
-#endif
+#if 0
 #if defined (USE_SELECT)
 struct socketwait_select {
 	fd_set *readset;
@@ -130,6 +129,7 @@ struct socketwait_select {
 	int maxfd;
 };
 #endif	/* USE_KQUEUE */
+#endif
 
 /*
  * Set by the -T dscp option on the command line. If set to a value
@@ -1073,9 +1073,19 @@ kqueue_process_fds(isc__socketmgr_t *manager, int nevents) {
 }
 
 static int
-kqueue_watcher(isc__socketmgr_t *manager) {
+kqueue_waitevents_time(isc___socketmgr_t *manager, struct timespec *tsp)
+{
+	struct mgrprivate_kevent *priv =
+		(struct mgrprivate_kevent *) manager->private;
+
 	return kevent(manager->kqueue_fd, NULL, 0,
-		    manager->events, manager->nevents, NULL);
+	              priv->events, priv->nevents,
+	              tsp);
+}
+
+static int
+kqueue_watcher(isc__socketmgr_t *manager) {
+	return kqueue_waitevents_time(manager, NULL);
 }
 
 static void
@@ -1128,6 +1138,20 @@ kqueue_unwatch_fd(isc__socketmgr_t *manager, int fd, int msg) {
 		result = isc__errno2result(errno);
 
 	return (result);
+}
+
+static int
+kqueue_waitevents(isc___socketmgr_t *manager, struct timeval *tvp)
+{
+	struct timespec ts, *tsp;
+
+	if (tvp != NULL) {
+		ts.tv_sec = tvp->tv_sec;
+		ts.tv_nsec = tvp->tv_usec * 1000;
+		tsp = &ts;
+	} else
+		tsp = NULL;
+	return kqueue_waitevents_time(manager, tsp);
 }
 
 const char kqueue_fnname[] = "kevent()";
@@ -1623,14 +1647,12 @@ devpoll_setup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 }
 
 static int
-devpoll_waitevents(isc___socketmgr_t *manager, struct timeval *tvp,
-			  isc_socketwait_t *swaitp)
+devpoll_waitevents(isc___socketmgr_t *manager, struct timeval *tvp)
 {
 	int n = 0;
 	isc_result_t result;
 	int pass;
 	struct dvpoll dvp;
-	struct socketwait_events *swait = (struct socketwait_events *swaitp);
 
 	/*
 	 * Re-probe every thousand calls.
@@ -1662,7 +1684,6 @@ devpoll_waitevents(isc___socketmgr_t *manager, struct timeval *tvp,
 		} else
 			break;
 	}
-	swait->nevents = n;
 	return n;
 }
 
@@ -6812,54 +6833,11 @@ isc_socket_socketevent(isc_mem_t *mctx, void *sender,
 }
 
 #ifndef USE_WATCHER_THREAD
-/*
- * In our assumed scenario, we can simply use a single static object.
- * XXX: this is not true if the application uses multiple threads with
- *      'multi-context' mode.  Fixing this is a future TODO item.
- */
-static isc_socketwait_t swait_private;
-
-#ifdef USE_KQUEUE
-static int
-kqueue_waitevents_time(isc___socketmgr_t *manager, struct timespec *tsp, struct socketwait_events *swait)
-{
-	swait->nevents = kevent(manager->kqueue_fd, NULL, 0,
-				       manager->events, manager->nevents,
-				       tsp);
-	return swait->nevents;
-}
-
-
-static int
-kqueue_waitevents(isc___socketmgr_t *manager, struct timeval *tvp,
-			  isc_socketwait_t *swaitp)
-{
-	struct timespec ts, *tsp;
-	struct socketwait_events *swait = (struct socketwait_events *) swaitp;
-	struct mgrprivate_kevent *priv = (struct mgrprivate_kevent *) manager->private;
-
-	if (tvp != NULL) {
-		ts.tv_sec = tvp->tv_sec;
-		ts.tv_nsec = tvp->tv_usec * 1000;
-		tsp = &ts;
-	} else
-		tsp = NULL;
-	return kqueue_waitevents_timespec(manager, tsp, swait);
-}
-#endif
-
-#ifdef USE_EPOLL
-#endif
-
-#ifdef USE_DEVPOLL
-#endif
-
 int
 isc__socketmgr_waitevents(isc_socketmgr_t *manager0, struct timeval *tvp,
 			  isc_socketwait_t **swaitp)
 {
 	isc__socketmgr_t *manager = (isc__socketmgr_t *)manager0;
-	int n;
 
 	REQUIRE(swaitp == NULL || swaitp != NULL && *swaitp == NULL);
 	REQUIRE(manager->operations != NULL);
@@ -6868,31 +6846,16 @@ isc__socketmgr_waitevents(isc_socketmgr_t *manager0, struct timeval *tvp,
 	if (manager == NULL)
 		manager = socketmgr;
 #endif
-	if (manager == NULL)
+	if (manager == NULL || manager->operations == NULL)
 		return (0);
 
-	return manager->operations->waitevents(manager, tvp);
-#if 0
-#ifdef USE_KQUEUE
-	n = swait_private.nevents = kqueue_waitevents(manager, tvp, &swait_private);
-#elif defined(USE_EPOLL)
-	n = swait_private.nevents = epoll_waitevents(manager, tvp, &swait_private);
-#elif defined(USE_DEVPOLL)
-	swait_private.nevents = n = devpoll_waitevents(manager, tvp, &swait_private);
-#elif defined(USE_SELECT)
-	n = select_waitevents(manager, tvp);
-#endif
-
-	*swaitp = &swait_private;
-	return (n);
-#endif
+	swait->nevents = manager->operations->waitevents(manager, tvp);
+	return swait->nevents;
 }
 
 isc_result_t
 isc__socketmgr_dispatch(isc_socketmgr_t *manager0, isc_socketwait_t *swait) {
 	isc__socketmgr_t *manager = (isc__socketmgr_t *)manager0;
-
-	REQUIRE(swait == &swait_private);
 
 #ifdef USE_SHARED_MANAGER
 	if (manager == NULL)
@@ -6901,9 +6864,6 @@ isc__socketmgr_dispatch(isc_socketmgr_t *manager0, isc_socketwait_t *swait) {
 	if (manager == NULL)
 		return (ISC_R_NOTFOUND);
 
-#if defined(USE_KQUEUE) || defined(USE_EPOLL) || defined(USE_DEVPOLL)
-	check_max_events(manager, swait->nevents);
-#endif
 	(void)process_fds(manager, swait->nevents);
 	return (ISC_R_SUCCESS);
 }
