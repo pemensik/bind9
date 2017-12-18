@@ -82,16 +82,12 @@
 #include "errno2result.h"
 
 /* See task.c about the following definition: */
-#ifdef ISC_PLATFORM_USETHREADS
-#define USE_WATCHER_THREAD
-#else
+#ifndef ISC_PLATFORM_USETHREADS
 #define USE_SHARED_MANAGER
 #endif	/* ISC_PLATFORM_USETHREADS */
 
 #include "socket_p.h"
-#ifndef USE_WATCHER_THREAD
 #include "../task_p.h"
-#endif /* USE_WATCHER_THREAD */
 
 #if defined(SO_BSDCOMPAT) && defined(__linux__)
 #include <sys/utsname.h>
@@ -117,19 +113,9 @@ typedef struct {
 #endif	/* ISC_PLATFORM_HAVEKQUEUE */
 #define USE_SELECT
 
-struct socketwait {
+struct isc_socketwait {
 	int nevents;
 };
-#if 0
-#if defined (USE_SELECT)
-struct socketwait_select {
-	fd_set *readset;
-	fd_set *writeset;
-	int nfds;
-	int maxfd;
-};
-#endif	/* USE_KQUEUE */
-#endif
 
 /*
  * Set by the -T dscp option on the command line. If set to a value
@@ -385,7 +371,9 @@ struct isc__socket {
 
 /* TODO: generic operations for create events. */
 struct socketmgr_operations {
-	isc_result_t (*create_private)(isc_mem_t *mctx, isc__socketmgr_t *mgr);
+	isc_result_t (*create_private)(isc_mem_t *mctx,
+	                               isc__socketmgr_t *mgr,
+	                               int maxevents);
 	void         (*destroy_private)(isc_mem_t *mctx, isc__socketmgr_t *mgr);
 	isc_result_t (*watch_fd)(isc__socketmgr_t *manager, int fd, int msg);
 	isc_result_t (*unwatch_fd)(isc__socketmgr_t *manager, int fd, int msg);
@@ -472,9 +460,7 @@ struct isc__socketmgr {
 #endif	/* USE_SELECT */
 #endif
 	unsigned int		maxsocks;
-#ifdef ISC_PLATFORM_USETHREADS
 	int			pipe_fds[2];
-#endif
 	/* Locked by fdlock. */
 	isc__socket_t	       **fds;
 	int			*fdstate;
@@ -502,12 +488,13 @@ struct isc__socketmgr {
 #endif	/* USE_SELECT */
 #endif
 	int			reserved;	/* unlocked */
-#ifdef USE_WATCHER_THREAD
+#ifdef ISC_PLATFORM_USETHREADS
 	isc_thread_t		watcher;
 	isc_condition_t		shutdown_ok;
-#else /* USE_WATCHER_THREAD */
+#endif
+#ifdef USE_SHARED_MANAGER
 	unsigned int		refs;
-#endif /* USE_WATCHER_THREAD */
+#endif /* USE_SHARED_MANAGER */
 	int			maxudp;
 };
 
@@ -551,9 +538,7 @@ static void build_msghdr_send(isc__socket_t *, isc_socketevent_t *,
 			      struct msghdr *, struct iovec *, size_t *);
 static void build_msghdr_recv(isc__socket_t *, isc_socketevent_t *,
 			      struct msghdr *, struct iovec *, size_t *);
-#ifdef USE_WATCHER_THREAD
 static isc_boolean_t process_ctlfd(isc__socketmgr_t *manager);
-#endif
 static void setdscp(isc__socket_t *sock, isc_dscp_t dscp);
 
 /*%
@@ -663,6 +648,10 @@ isc__socketmgr_create(isc_mem_t *mctx, isc_socketmgr_t **managerp);
 isc_result_t
 isc__socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 		       unsigned int maxsocks);
+isc_result_t
+isc__socketmgr_create3(isc_mem_t *mctx, isc_socketmgr_t **managerp,
+		       unsigned int maxsocks, unsigned maxevents,
+		       isc_boolean_t watcher_thread);
 isc_result_t
 isc_socketmgr_getmaxsockets(isc_socketmgr_t *manager0, unsigned int *nsockp);
 void
@@ -844,8 +833,6 @@ static const isc_statscounter_t rawstatsindex[] = {
 	isc_sockstatscounter_rawactive
 };
 
-#if defined(USE_KQUEUE) || defined(USE_EPOLL) || defined(USE_DEVPOLL) || \
-    defined(USE_WATCHER_THREAD)
 static void
 manager_log(isc__socketmgr_t *sockmgr,
 	    isc_logcategory_t *category, isc_logmodule_t *module, int level,
@@ -868,7 +855,6 @@ manager_log(isc__socketmgr_t *sockmgr,
 	isc_log_write(isc_lctx, category, module, level,
 		      "sockmgr %p: %s", sockmgr, msgbuf);
 }
-#endif
 
 static void
 socket_log(isc__socket_t *sock, isc_sockaddr_t *address,
@@ -1058,12 +1044,10 @@ kqueue_process_fds(isc__socketmgr_t *manager, int nevents) {
 
 	for (i = 0; i < s->nevents; i++) {
 		REQUIRE(events[i].ident < manager->maxsocks);
-#ifdef USE_WATCHER_THREAD
 		if (events[i].ident == (uintptr_t)manager->pipe_fds[0]) {
 			have_ctlevent = ISC_TRUE;
 			continue;
 		}
-#endif
 		readable = ISC_TF(events[i].filter == EVFILT_READ);
 		writable = ISC_TF(events[i].filter == EVFILT_WRITE);
 		process_fd(manager, events[i].ident, readable, writable);
@@ -1113,12 +1097,10 @@ kqueue_setup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 			    sizeof(struct kevent) * manager->nevents);
 		return (result);
 	}
-#ifdef USE_WATCHER_THREAD
 	result = watch_ctlfd(manager);
 	if (result != ISC_R_SUCCESS) {
 		kqueue_cleanup_watcher(mctx, manager);
 	}
-#endif	/* USE_WATCHER_THREAD */
 	return (result);
 }
 
@@ -1251,12 +1233,11 @@ epoll_process_fds(isc__socketmgr_t *manager, int nevents)
 
 	for (i = 0; i < nevents; i++) {
 		REQUIRE(events[i].data.fd < (int)manager->maxsocks);
-#ifdef USE_WATCHER_THREAD
-		if (events[i].data.fd == manager->pipe_fds[0]) {
+		if (manager->pipe_fds[0] != -1 &&
+		    events[i].data.fd == manager->pipe_fds[0]) {
 			have_ctlevent = ISC_TRUE;
 			continue;
 		}
-#endif
 		if ((events[i].events & EPOLLERR) != 0 ||
 		    (events[i].events & EPOLLHUP) != 0) {
 			/*
@@ -1319,12 +1300,10 @@ epoll_setup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 			    sizeof(struct epoll_event) * priv->nevents);
 		return (result);
 	}
-#ifdef USE_WATCHER_THREAD
 	result = watch_ctlfd(manager);
 	if (result != ISC_R_SUCCESS) {
 		epoll_cleanup_watcher(mctx, manager);
 	}
-#endif	/* USE_WATCHER_THREAD */
 	return (result);
 }
 
@@ -1338,7 +1317,10 @@ epoll_waitevents(isc__socketmgr_t *manager, struct timeval *tvp)
 }
 
 static isc_result_t
-epoll_create_private(isc_mem_t *mctx, isc__socketmgr_t *manager) {
+epoll_create_private(isc_mem_t *mctx,
+                     isc__socketmgr_t *manager,
+                     int maxevents)
+{
 	struct mgrprivate_epoll *priv;
 
 	REQUIRE(manager->private == NULL);
@@ -1348,7 +1330,7 @@ epoll_create_private(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 		return (ISC_R_NOMEMORY);
 	memset(priv, 0, sizeof(struct mgrprivate_epoll));
 
-	priv->nevents = ISC_SOCKET_MAXEVENTS;
+	priv->nevents = maxevents;
 	priv->events = isc_mem_get(mctx, sizeof(struct epoll_event) *
 				      priv->nevents);
 	if (priv->events == NULL) {
@@ -1500,12 +1482,10 @@ devpoll_process_fds(isc__socketmgr_t *manager, int nevents) {
 
 	for (i = 0; i < nevents; i++) {
 		REQUIRE(events[i].fd < (int)manager->maxsocks);
-#ifdef USE_WATCHER_THREAD
 		if (events[i].fd == manager->pipe_fds[0]) {
 			have_ctlevent = ISC_TRUE;
 			continue;
 		}
-#endif
 		process_fd(manager, events[i].fd,
 			   (events[i].events & POLLIN) != 0,
 			   (events[i].events & POLLOUT) != 0);
@@ -1638,12 +1618,10 @@ devpoll_setup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 			    sizeof(pollinfo_t) * manager->maxsocks);
 		return (result);
 	}
-#ifdef USE_WATCHER_THREAD
 	result = watch_ctlfd(manager);
 	if (result != ISC_R_SUCCESS) {
 		devpoll_cleanup_watcher(mctx, manager);
 	}
-#endif	/* USE_WATCHER_THREAD */
 	return (result);
 }
 
@@ -1769,10 +1747,8 @@ select_closesocket(isc__socketmgr_t *manager, int fd)
 			}
 			UNLOCK(&manager->fdlock[lockid]);
 		}
-#ifdef ISC_PLATFORM_USETHREADS
 		if (priv->maxfd < manager->pipe_fds[0])
 			priv->maxfd = manager->pipe_fds[0];
-#endif
 	}
 
 	UNLOCK(&manager->lock);
@@ -1871,12 +1847,12 @@ select_setup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 	memset(priv->read_fds, 0, priv->fd_bufsize);
 	memset(priv->write_fds, 0, priv->fd_bufsize);
 
-#ifdef USE_WATCHER_THREAD
-	(void)watch_ctlfd(manager);
-	priv->maxfd = manager->pipe_fds[0];
-#else /* USE_WATCHER_THREAD */
-	priv->maxfd = 0;
-#endif /* USE_WATCHER_THREAD */
+	if (manager->pipe_fds[0] != -1) {
+		(void)watch_ctlfd(manager);
+		priv->maxfd = manager->pipe_fds[0];
+	}
+	else
+		priv->maxfd = 0;
 	return (ISC_R_SUCCESS);
 }
 
@@ -1892,17 +1868,16 @@ select_process_fds(isc__socketmgr_t *manager, int nevents)
 	REQUIRE(priv->maxfd <= (int)manager->maxsocks);
 
 	for (i = 0; i < priv->maxfd+1; i++) {
-#ifdef USE_WATCHER_THREAD
 		if (i == manager->pipe_fds[0] || i == manager->pipe_fds[1])
 			continue;
-#endif /* USE_WATCHER_THREAD */
 		process_fd(manager, i, FD_ISSET(i, priv->read_fds_copy),
 			   FD_ISSET(i, priv->write_fds_copy));
 	}
 	/*
 	 * Process reads on internal, control fd.
 	 */
-	return (ISC_TF(FD_ISSET(manager->pipe_fds[0], priv->read_fds_copy)));
+	return (ISC_TF(manager->pipe_fds[0] != -1 &&
+	               FD_ISSET(manager->pipe_fds[0], priv->read_fds_copy)));
 }
 
 static int
@@ -1912,9 +1887,13 @@ select_waitevents(isc__socketmgr_t *manager, struct timeval *tvp)
 }
 
 static isc_result_t
-select_create_private(isc_mem_t *mctx, isc__socketmgr_t *manager) {
+select_create_private(isc_mem_t *mctx,
+                      isc__socketmgr_t *manager,
+                      int maxevents)
+{
 	struct mgrprivate_select *priv;
 
+	UNUSED(maxevents);
 	REQUIRE(manager->private == NULL);
 
 	priv = isc_mem_get(mctx, sizeof(struct mgrprivate_select));
@@ -2027,14 +2006,13 @@ wakeup_socket(isc__socketmgr_t *manager, int fd, int msg) {
 	}
 }
 
-#ifdef USE_WATCHER_THREAD
 /*
  * Poke the select loop when there is something for us to do.
  * The write is required (by POSIX) to complete.  That is, we
  * will not get partial writes.
  */
 static void
-select_poke(isc__socketmgr_t *mgr, int fd, int msg) {
+select_poke_pipe(isc__socketmgr_t *mgr, int fd, int msg) {
 	int cc;
 	int buf[2];
 	char strbuf[ISC_STRERRORSIZE];
@@ -2098,19 +2076,21 @@ select_readmsg(isc__socketmgr_t *mgr, int *fd, int *msg) {
 	*fd = buf[0];
 	*msg = buf[1];
 }
-#else /* USE_WATCHER_THREAD */
+
 /*
  * Update the state of the socketmgr when something changes.
  */
 static void
 select_poke(isc__socketmgr_t *manager, int fd, int msg) {
-	if (msg == SELECT_POKE_SHUTDOWN)
-		return;
-	else if (fd >= 0)
-		wakeup_socket(manager, fd, msg);
-	return;
+	if (manager->pipe_fds[0] != -1) {
+		select_poke_pipe(manager, fd, msg);
+	} else {
+		if (msg == SELECT_POKE_SHUTDOWN)
+			return;
+		else if (fd >= 0)
+			wakeup_socket(manager, fd, msg);
+	}
 }
-#endif /* USE_WATCHER_THREAD */
 
 /*
  * Make a fd non-blocking.
@@ -3131,10 +3111,10 @@ destroy(isc__socket_t **sockp) {
 
 	ISC_LIST_UNLINK(manager->socklist, sock, link);
 
-#ifdef USE_WATCHER_THREAD
-	if (ISC_LIST_EMPTY(manager->socklist))
-		SIGNAL(&manager->shutdown_ok);
-#endif /* USE_WATCHER_THREAD */
+	if (manager->pipe_fds[0] != -1) {
+		if (ISC_LIST_EMPTY(manager->socklist))
+			SIGNAL(&manager->shutdown_ok);
+	}
 
 	/* can't unlock manager as its memory context is still used */
 	free_socket(sockp);
@@ -4869,10 +4849,11 @@ process_fds(isc__socketmgr_t *manager, int nevents) {
 	return manager->operations->process_fds(manager, nevents);
 }
 
-#ifdef USE_WATCHER_THREAD
 static isc_boolean_t
 process_ctlfd(isc__socketmgr_t *manager) {
 	int msg, fd;
+
+	INSIST(manager->pipe_fds[0] != -1);
 
 	for (;;) {
 		select_readmsg(manager, &fd, &msg);
@@ -4959,7 +4940,6 @@ watcher(void *uap) {
 
 	return ((isc_threadresult_t)0);
 }
-#endif /* USE_WATCHER_THREAD */
 
 void
 isc__socketmgr_setreserved(isc_socketmgr_t *manager0, isc_uint32_t reserved) {
@@ -4986,6 +4966,8 @@ isc__socketmgr_maxudp(isc_socketmgr_t *manager0, int maxudp) {
 static isc_result_t
 watch_ctlfd(isc__socketmgr_t *manager)
 {
+	if (manager->pipe_fds[0] == -1)
+		return (ISC_R_SUCCESS);
 	return watch_fd(manager, manager->pipe_fds[0], SELECT_POKE_READ);
 }
 
@@ -5008,17 +4990,20 @@ setup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
 
 static void
 cleanup_watcher(isc_mem_t *mctx, isc__socketmgr_t *manager) {
-#ifdef USE_WATCHER_THREAD
-	isc_result_t result;
+	if (manager->pipe_fds[0] != -1) {
+		isc_result_t result;
 
-	result = unwatch_fd(manager, manager->pipe_fds[0], SELECT_POKE_READ);
-	if (result != ISC_R_SUCCESS) {
-		UNEXPECTED_ERROR(__FILE__, __LINE__,
-				 "epoll_ctl(DEL) %s",
-				 isc_msgcat_get(isc_msgcat, ISC_MSGSET_GENERAL,
-						ISC_MSG_FAILED, "failed"));
+		result = unwatch_fd(manager, manager->pipe_fds[0],
+		                    SELECT_POKE_READ);
+		if (result != ISC_R_SUCCESS) {
+			UNEXPECTED_ERROR(__FILE__, __LINE__,
+					 "epoll_ctl(DEL) %s",
+					 isc_msgcat_get(isc_msgcat,
+					                ISC_MSGSET_GENERAL,
+							ISC_MSG_FAILED,
+					                "failed"));
+		}
 	}
-#endif	/* USE_WATCHER_THREAD */
 
 	manager->operations->cleanup_watcher(mctx, manager);
 }
@@ -5049,12 +5034,20 @@ setup_operations(isc__socketmgr_t *manager) {
 
 isc_result_t
 isc__socketmgr_create(isc_mem_t *mctx, isc_socketmgr_t **managerp) {
-	return (isc__socketmgr_create2(mctx, managerp, 0));
+	return (isc__socketmgr_create3(mctx, managerp, 0, 0, ISC_TRUE));
 }
 
 isc_result_t
 isc__socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 		       unsigned int maxsocks)
+{
+	return (isc__socketmgr_create3(mctx, managerp, maxsocks, 0, ISC_TRUE));
+}
+
+isc_result_t
+isc__socketmgr_create3(isc_mem_t *mctx, isc_socketmgr_t **managerp,
+		       unsigned int maxsocks, unsigned maxevents,
+		       isc_boolean_t watcher_thread)
 {
 	int i;
 	isc__socketmgr_t *manager;
@@ -5076,6 +5069,8 @@ isc__socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 
 	if (maxsocks == 0)
 		maxsocks = ISC_SOCKET_MAXSOCKETS;
+	if (maxevents == 0)
+		maxevents = ISC_SOCKET_MAXEVENTS;
 
 	manager = isc_mem_get(mctx, sizeof(*manager));
 	if (manager == NULL)
@@ -5126,7 +5121,7 @@ isc__socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 		}
 	}
 
-#ifdef USE_WATCHER_THREAD
+#ifdef ISC_PLATFORM_USETHREADS
 	if (isc_condition_init(&manager->shutdown_ok) != ISC_R_SUCCESS) {
 		UNEXPECTED_ERROR(__FILE__, __LINE__,
 				 "isc_condition_init() %s",
@@ -5135,22 +5130,26 @@ isc__socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 		result = ISC_R_UNEXPECTED;
 		goto cleanup_lock;
 	}
-
-	/*
-	 * Create the special fds that will be used to wake up the
-	 * select/poll loop when something internal needs to be done.
-	 */
-	if (pipe(manager->pipe_fds) != 0) {
-		LOG_ERRNO_FAILURE("pipe()");
-		result = ISC_R_UNEXPECTED;
-		goto cleanup_condition;
-	}
-
-	RUNTIME_CHECK(make_nonblock(manager->pipe_fds[0]) == ISC_R_SUCCESS);
-#if 0
-	RUNTIME_CHECK(make_nonblock(manager->pipe_fds[1]) == ISC_R_SUCCESS);
 #endif
-#endif	/* USE_WATCHER_THREAD */
+
+	if (watcher_thread) {
+		/*
+		 * Create the special fds that will be used to wake up the
+		 * select/poll loop when something internal needs to be done.
+		 */
+		if (pipe(manager->pipe_fds) != 0) {
+			LOG_ERRNO_FAILURE("pipe()");
+			result = ISC_R_UNEXPECTED;
+			goto cleanup_condition;
+		}
+
+		RUNTIME_CHECK(make_nonblock(manager->pipe_fds[0]) == ISC_R_SUCCESS);
+#if 0
+		RUNTIME_CHECK(make_nonblock(manager->pipe_fds[1]) == ISC_R_SUCCESS);
+#endif
+	} else {
+		manager->pipe_fds[0] = manager->pipe_fds[1] = -1;
+	}
 
 #ifdef USE_SHARED_MANAGER
 	manager->refs = 1;
@@ -5159,7 +5158,7 @@ isc__socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 	setup_operations(manager);
 	INSIST(manager->operations != NULL);
 
-	result = manager->operations->create_private(mctx, manager);
+	result = manager->operations->create_private(mctx, manager, maxevents);
 	if (result != ISC_R_SUCCESS)
 		goto cleanup;
 
@@ -5172,22 +5171,24 @@ isc__socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 
 	memset(manager->fdstate, 0, manager->maxsocks * sizeof(int));
 
-#ifdef USE_WATCHER_THREAD
-	/*
-	 * Start up the select/poll thread.
-	 */
-	if (isc_thread_create(watcher, manager, &manager->watcher) !=
-	    ISC_R_SUCCESS) {
-		UNEXPECTED_ERROR(__FILE__, __LINE__,
-				 "isc_thread_create() %s",
-				 isc_msgcat_get(isc_msgcat, ISC_MSGSET_GENERAL,
-						ISC_MSG_FAILED, "failed"));
-		cleanup_watcher(mctx, manager);
-		result = ISC_R_UNEXPECTED;
-		goto cleanup;
+	if (watcher_thread) {
+		/*
+		 * Start up the select/poll thread.
+		 */
+		if (isc_thread_create(watcher, manager, &manager->watcher) !=
+		    ISC_R_SUCCESS) {
+			UNEXPECTED_ERROR(__FILE__, __LINE__,
+					 "isc_thread_create() %s",
+					 isc_msgcat_get(isc_msgcat,
+					                ISC_MSGSET_GENERAL,
+							ISC_MSG_FAILED,
+					                "failed"));
+			cleanup_watcher(mctx, manager);
+			result = ISC_R_UNEXPECTED;
+			goto cleanup;
+		}
+		isc_thread_setname(manager->watcher, "isc-socket");
 	}
-	isc_thread_setname(manager->watcher, "isc-socket");
-#endif /* USE_WATCHER_THREAD */
 	isc_mem_attach(mctx, &manager->mctx);
 
 #ifdef USE_SHARED_MANAGER
@@ -5198,19 +5199,19 @@ isc__socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 	return (ISC_R_SUCCESS);
 
 cleanup:
-#ifdef USE_WATCHER_THREAD
-	(void)close(manager->pipe_fds[0]);
-	(void)close(manager->pipe_fds[1]);
-#endif	/* USE_WATCHER_THREAD */
+	if (manager->pipe_fds[0] != -1) {
+		(void)close(manager->pipe_fds[0]);
+		(void)close(manager->pipe_fds[1]);
+	}
 
 	if (manager->private != NULL && manager->operations != NULL) {
 		manager->operations->destroy_private(manager->mctx, manager);
 	}
 
-#ifdef USE_WATCHER_THREAD
+#ifdef ISC_PLATFORM_USETHREADS
 cleanup_condition:
 	(void)isc_condition_destroy(&manager->shutdown_ok);
-#endif	/* USE_WATCHER_THREAD */
+#endif	/* ISC_PLATFORM_USETHREADS */
 
 
 cleanup_lock:
@@ -5290,17 +5291,18 @@ isc__socketmgr_destroy(isc_socketmgr_t **managerp) {
 	 * Wait for all sockets to be destroyed.
 	 */
 	while (!ISC_LIST_EMPTY(manager->socklist)) {
-#ifdef USE_WATCHER_THREAD
-		manager_log(manager, CREATION, "%s",
-			    isc_msgcat_get(isc_msgcat, ISC_MSGSET_SOCKET,
-					   ISC_MSG_SOCKETSREMAIN,
-					   "sockets exist"));
-		WAIT(&manager->shutdown_ok, &manager->lock);
-#else /* USE_WATCHER_THREAD */
-		UNLOCK(&manager->lock);
-		isc__taskmgr_dispatch(NULL);
-		LOCK(&manager->lock);
-#endif /* USE_WATCHER_THREAD */
+		if (manager->pipe_fds[0] != -1) {
+			manager_log(manager, CREATION, "%s",
+				    isc_msgcat_get(isc_msgcat,
+						   ISC_MSGSET_SOCKET,
+						   ISC_MSG_SOCKETSREMAIN,
+						   "sockets exist"));
+			WAIT(&manager->shutdown_ok, &manager->lock);
+		} else {
+			UNLOCK(&manager->lock);
+			isc__taskmgr_dispatch(NULL);
+			LOCK(&manager->lock);
+		}
 	}
 
 	UNLOCK(&manager->lock);
@@ -5312,27 +5314,26 @@ isc__socketmgr_destroy(isc_socketmgr_t **managerp) {
 	 */
 	select_poke(manager, 0, SELECT_POKE_SHUTDOWN);
 
-#ifdef USE_WATCHER_THREAD
 	/*
 	 * Wait for thread to exit.
 	 */
-	if (isc_thread_join(manager->watcher, NULL) != ISC_R_SUCCESS)
+	if (manager->pipe_fds[0] != -1 &&
+	    isc_thread_join(manager->watcher, NULL) != ISC_R_SUCCESS)
 		UNEXPECTED_ERROR(__FILE__, __LINE__,
 				 "isc_thread_join() %s",
 				 isc_msgcat_get(isc_msgcat, ISC_MSGSET_GENERAL,
 						ISC_MSG_FAILED, "failed"));
-#endif /* USE_WATCHER_THREAD */
 
 	/*
 	 * Clean up.
 	 */
 	cleanup_watcher(manager->mctx, manager);
 
-#ifdef USE_WATCHER_THREAD
 	(void)close(manager->pipe_fds[0]);
 	(void)close(manager->pipe_fds[1]);
+#ifdef ISC_PLATFORM_USETHREADS
 	(void)isc_condition_destroy(&manager->shutdown_ok);
-#endif /* USE_WATCHER_THREAD */
+#endif /* ISC_PLATFORM_USETHREADS */
 
 	for (i = 0; i < (int)manager->maxsocks; i++)
 		if (manager->fdstate[i] == CLOSE_PENDING) /* no need to lock */
@@ -6836,14 +6837,13 @@ isc_socket_socketevent(isc_mem_t *mctx, void *sender,
 	return (allocate_socketevent(mctx, sender, eventtype, action, arg));
 }
 
-#ifndef USE_WATCHER_THREAD
 int
 isc__socketmgr_waitevents(isc_socketmgr_t *manager0, struct timeval *tvp,
-			  isc_socketwait_t **swaitp)
+			  isc_socketwait_t *swait)
 {
 	isc__socketmgr_t *manager = (isc__socketmgr_t *)manager0;
+	int n;
 
-	REQUIRE(swaitp == NULL || swaitp != NULL && *swaitp == NULL);
 	REQUIRE(manager->operations != NULL);
 
 #ifdef USE_SHARED_MANAGER
@@ -6853,8 +6853,10 @@ isc__socketmgr_waitevents(isc_socketmgr_t *manager0, struct timeval *tvp,
 	if (manager == NULL || manager->operations == NULL)
 		return (0);
 
-	swait->nevents = manager->operations->waitevents(manager, tvp);
-	return swait->nevents;
+	n = manager->operations->waitevents(manager, tvp);
+	if (swait != NULL)
+		swait->nevents = n;
+	return n;
 }
 
 isc_result_t
@@ -6871,7 +6873,6 @@ isc__socketmgr_dispatch(isc_socketmgr_t *manager0, isc_socketwait_t *swait) {
 	(void)process_fds(manager, swait->nevents);
 	return (ISC_R_SUCCESS);
 }
-#endif /* USE_WATCHER_THREAD */
 
 void
 isc__socket_setname(isc_socket_t *socket0, const char *name, void *tag) {

@@ -68,6 +68,7 @@
 #define isc_socket_detach isc__socket_detach
 #define isc_socketmgr_create isc__socketmgr_create
 #define isc_socketmgr_create2 isc__socketmgr_create2
+#define isc_socketmgr_create3 isc__socketmgr_create3
 #define isc_socketmgr_destroy isc__socketmgr_destroy
 #define isc_socket_open isc__socket_open
 #define isc_socket_close isc__socket_close
@@ -1022,6 +1023,10 @@ isc_socketmgr_create(isc_mem_t *mctx, isc_socketmgr_t **managerp);
 isc_result_t
 isc_socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 		      unsigned int maxsocks);
+isc_result_t
+isc_socketmgr_create3(isc_mem_t *mctx, isc_socketmgr_t **managerp,
+		       unsigned int maxsocks, unsigned maxevents,
+		       isc_boolean_t watcher_thread);
 /*%<
  * Create a socket manager.  If "maxsocks" is non-zero, it specifies the
  * maximum number of sockets that the created manager should handle.

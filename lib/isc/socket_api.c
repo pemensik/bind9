@@ -302,6 +302,15 @@ isc_socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 }
 
 isc_result_t
+isc_socketmgr_create3(isc_mem_t *mctx, isc_socketmgr_t **managerp,
+		      unsigned int maxsocks, unsigned int maxevents,
+		      isc_boolean_t watcher_thread)
+{
+	return (isc__socketmgr_create3(mctx, managerp, maxsocks, maxevents,
+	                               watcher_thread));
+}
+
+isc_result_t
 isc_socket_recvv(isc_socket_t *sock, isc_bufferlist_t *buflist,
 		 unsigned int minimum, isc_task_t *task,
 		 isc_taskaction_t action, void *arg)
