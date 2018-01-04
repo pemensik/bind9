@@ -478,6 +478,6 @@ isc_time_formatISO8601ms(const isc_time_t *t, char *buf, unsigned int len) {
 	if (flen == len - 5) {
 		flen -= 1; /* rewind one character */
 		snprintf(buf + flen, len - flen, ".%03uZ",
-			 t->nanoseconds / NS_PER_MS);
+			 (t->nanoseconds / NS_PER_MS) % 1000);
 	}
 }
