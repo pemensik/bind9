@@ -341,6 +341,10 @@ isc_timermgr_createinctx(isc_mem_t *mctx, isc_appctx_t *actx,
 			 isc_timermgr_t **managerp);
 
 isc_result_t
+isc__timermgr_createthread(isc_mem_t *mctx, isc_boolean_t usethread,
+			   isc_timermgr_t **managerp);
+
+isc_result_t
 isc_timermgr_create(isc_mem_t *mctx, isc_timermgr_t **managerp);
 /*%<
  * Create a timer manager.  isc_timermgr_createinctx() also associates
@@ -349,6 +353,8 @@ isc_timermgr_create(isc_mem_t *mctx, isc_timermgr_t **managerp);
  * Notes:
  *
  *\li	All memory will be allocated in memory context 'mctx'.
+ *
+ *\li   'usethread' true for timer thread, false on single thread application.
  *
  * Requires:
  *
@@ -398,7 +404,8 @@ void isc_timermgr_poke(isc_timermgr_t *m);
  * See isc_timermgr_create() above.
  */
 typedef isc_result_t
-(*isc_timermgrcreatefunc_t)(isc_mem_t *mctx, isc_timermgr_t **managerp);
+(*isc_timermgrcreatefunc_t)(isc_mem_t *mctx, isc_boolean_t usethread,
+			    isc_timermgr_t **managerp);
 
 isc_result_t
 isc__timer_register(void);
