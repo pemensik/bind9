@@ -253,6 +253,8 @@ static inline isc__task_t *
 pop_readyq(isc__taskmgr_t *manager);
 
 static inline void
+isc__taskqueue_init(isc__taskqueue_t *queue);
+static inline void
 push_readyq(isc__taskqueue_t *queue, isc__task_t *task);
 
 static struct isc__taskmethods {
@@ -983,6 +985,14 @@ pop_readyq(isc__taskmgr_t *manager) {
 	return (task);
 }
 
+static inline void
+isc__taskqueue_init(isc__taskqueue_t *queue)
+{
+	ISC_LIST_INIT(queue->normal);
+	ISC_LIST_INIT(queue->priority);
+	queue->ready = 0;
+}
+
 /*
  * Push 'task' onto the ready_tasks queue.  If 'task' has the privilege
  * flag set, then also push it onto the ready_priority_tasks queue.
@@ -1059,9 +1069,7 @@ dispatch(isc__taskmgr_t *manager) {
 	LOCK(&manager->lock);
 
 	if (manager->threads == NULL) {
-		ISC_LIST_INIT(new_queue.normal);
-		ISC_LIST_INIT(new_queue.priority);
-		new_queue.ready = 0;
+		isc__taskqueue_init(&new_queue);
 	}
 
 	while (!FINISHED(manager)) {
@@ -1450,9 +1458,7 @@ isc__taskmgr_create(isc_mem_t *mctx, unsigned int workers,
 		default_quantum = DEFAULT_DEFAULT_QUANTUM;
 	manager->default_quantum = default_quantum;
 	INIT_LIST(manager->tasks);
-	INIT_LIST(manager->ready_queue.normal);
-	INIT_LIST(manager->ready_queue.priority);
-	manager->ready_queue.ready = 0;
+	isc__taskqueue_init(&manager->ready_queue);
 	manager->tasks_running = 0;
 	manager->exclusive_requested = ISC_FALSE;
 	manager->pause_requested = ISC_FALSE;
