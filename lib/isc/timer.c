@@ -1116,11 +1116,14 @@ isc_timermgr_createinctx(isc_mem_t *mctx, isc_appctx_t *actx,
 			 isc_timermgr_t **managerp)
 {
 	isc_result_t result;
+	isc_boolean_t usethread;
+
+	usethread = isc_appctx_usethread(actx);
 
 	LOCK(&createlock);
 
 	REQUIRE(timermgr_createfunc != NULL);
-	result = (*timermgr_createfunc)(mctx, ISC_TRUE, managerp);
+	result = (*timermgr_createfunc)(mctx, usethread, managerp);
 
 	UNLOCK(&createlock);
 

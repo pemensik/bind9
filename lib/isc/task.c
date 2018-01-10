@@ -2076,6 +2076,9 @@ isc_taskmgr_createinctx(isc_mem_t *mctx, isc_appctx_t *actx,
 {
 	isc_result_t result;
 
+	if (isc_appctx_usethread(actx) == ISC_FALSE)
+		workers = 0;
+
 	LOCK(&createlock);
 
 	REQUIRE(taskmgr_createfunc != NULL);

@@ -649,9 +649,10 @@ isc_result_t
 isc__socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 		       unsigned int maxsocks);
 isc_result_t
-isc__socketmgr_create3(isc_mem_t *mctx, isc_socketmgr_t **managerp,
-		       unsigned int maxsocks, unsigned maxevents,
-		       isc_boolean_t watcher_thread);
+isc__socketmgr_create3(isc_mem_t *mctx,
+		       unsigned int maxsocks, unsigned int maxevents,
+		       isc_boolean_t watcher_thread,
+		       isc_socketmgr_t **managerp);
 isc_result_t
 isc_socketmgr_getmaxsockets(isc_socketmgr_t *manager0, unsigned int *nsockp);
 void
@@ -5034,20 +5035,21 @@ setup_operations(isc__socketmgr_t *manager) {
 
 isc_result_t
 isc__socketmgr_create(isc_mem_t *mctx, isc_socketmgr_t **managerp) {
-	return (isc__socketmgr_create3(mctx, managerp, 0, 0, ISC_TRUE));
+	return (isc__socketmgr_create3(mctx, 0, 0, ISC_TRUE, managerp));
 }
 
 isc_result_t
 isc__socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 		       unsigned int maxsocks)
 {
-	return (isc__socketmgr_create3(mctx, managerp, maxsocks, 0, ISC_TRUE));
+	return (isc__socketmgr_create3(mctx, maxsocks, 0, ISC_TRUE, managerp));
 }
 
 isc_result_t
-isc__socketmgr_create3(isc_mem_t *mctx, isc_socketmgr_t **managerp,
-		       unsigned int maxsocks, unsigned maxevents,
-		       isc_boolean_t watcher_thread)
+isc__socketmgr_create3(isc_mem_t *mctx,
+		       unsigned int maxsocks, unsigned int maxevents,
+		       isc_boolean_t watcher_thread,
+		       isc_socketmgr_t **managerp)
 {
 	int i;
 	isc__socketmgr_t *manager;
@@ -6906,7 +6908,7 @@ isc__socket_gettag(isc_socket_t *socket0) {
 
 isc_result_t
 isc__socket_register(void) {
-	return (isc_socket_register(isc__socketmgr_create));
+	return (isc_socket_register(isc__socketmgr_create3));
 }
 
 int

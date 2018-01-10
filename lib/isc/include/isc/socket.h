@@ -1024,9 +1024,9 @@ isc_result_t
 isc_socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 		      unsigned int maxsocks);
 isc_result_t
-isc_socketmgr_create3(isc_mem_t *mctx, isc_socketmgr_t **managerp,
-		       unsigned int maxsocks, unsigned maxevents,
-		       isc_boolean_t watcher_thread);
+isc_socketmgr_create3(isc_mem_t *mctx,
+		      unsigned int maxsocks, unsigned int maxevents,
+		      isc_boolean_t usethread, isc_socketmgr_t **managerp);
 /*%<
  * Create a socket manager.  If "maxsocks" is non-zero, it specifies the
  * maximum number of sockets that the created manager should handle.
@@ -1249,7 +1249,10 @@ isc_socketmgr_renderjson(isc_socketmgr_t *mgr, json_object *stats);
  * See isc_socketmgr_create() above.
  */
 typedef isc_result_t
-(*isc_socketmgrcreatefunc_t)(isc_mem_t *mctx, isc_socketmgr_t **managerp);
+(*isc_socketmgrcreatefunc_t)(isc_mem_t *mctx,
+			     unsigned int maxsockets, unsigned int events,
+			     isc_boolean_t usethread,
+			     isc_socketmgr_t **managerp);
 
 isc_result_t
 isc_socket_register(isc_socketmgrcreatefunc_t createfunc);

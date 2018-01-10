@@ -2707,6 +2707,19 @@ isc__socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 }
 
 isc_result_t
+isc__socketmgr_create3(isc_mem_t *mctx, isc_socketmgr_t **managerp,
+		       unsigned int maxsocks, unsigned int events,
+		       isc_boolean_t watcher_thread)
+{
+	REQUIRE(managerp != NULL && *managerp == NULL);
+
+	if (events != 0 || watcher_thread != ISC_TRUE)
+		return (ISC_R_NOTIMPLEMENTED);
+	else
+		return isc__socketmgr_create2(mctx, managerp, maxsocks);
+}
+
+isc_result_t
 isc_socketmgr_getmaxsockets(isc_socketmgr_t *manager, unsigned int *nsockp) {
 	REQUIRE(VALID_MANAGER(manager));
 	REQUIRE(nsockp != NULL);

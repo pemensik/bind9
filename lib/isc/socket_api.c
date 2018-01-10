@@ -47,11 +47,14 @@ isc_socketmgr_createinctx(isc_mem_t *mctx, isc_appctx_t *actx,
 			  isc_socketmgr_t **managerp)
 {
 	isc_result_t result;
+	isc_boolean_t usethread;
+
+	usethread = isc_appctx_usethread(actx);
 
 	LOCK(&createlock);
 
 	REQUIRE(socketmgr_createfunc != NULL);
-	result = (*socketmgr_createfunc)(mctx, managerp);
+	result = (*socketmgr_createfunc)(mctx, 0, 0, usethread, managerp);
 
 	UNLOCK(&createlock);
 
@@ -71,7 +74,7 @@ isc_socketmgr_create(isc_mem_t *mctx, isc_socketmgr_t **managerp) {
 	LOCK(&createlock);
 
 	REQUIRE(socketmgr_createfunc != NULL);
-	result = (*socketmgr_createfunc)(mctx, managerp);
+	result = (*socketmgr_createfunc)(mctx, 0, 0, ISC_TRUE, managerp);
 
 	UNLOCK(&createlock);
 
@@ -302,12 +305,12 @@ isc_socketmgr_create2(isc_mem_t *mctx, isc_socketmgr_t **managerp,
 }
 
 isc_result_t
-isc_socketmgr_create3(isc_mem_t *mctx, isc_socketmgr_t **managerp,
+isc_socketmgr_create3(isc_mem_t *mctx,
 		      unsigned int maxsocks, unsigned int maxevents,
-		      isc_boolean_t watcher_thread)
+		      isc_boolean_t usethread, isc_socketmgr_t **managerp)
 {
-	return (isc__socketmgr_create3(mctx, managerp, maxsocks, maxevents,
-	                               watcher_thread));
+	return (isc__socketmgr_create3(mctx, maxsocks, maxevents,
+	                               usethread, managerp));
 }
 
 isc_result_t
