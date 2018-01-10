@@ -81,6 +81,8 @@ void isc__appctx_destroy(isc_appctx_t **ctxp);
 void isc__appctx_settaskmgr(isc_appctx_t *ctx, isc_taskmgr_t *taskmgr);
 void isc__appctx_setsocketmgr(isc_appctx_t *ctx, isc_socketmgr_t *socketmgr);
 void isc__appctx_settimermgr(isc_appctx_t *ctx, isc_timermgr_t *timermgr);
+isc_boolean_t isc__appctx_usethread(isc_appctx_t *ctx);
+void isc__appctx_setusethread(isc_appctx_t *ctx, isc_boolean_t usethread);
 isc_result_t isc__app_ctxonrun(isc_appctx_t *ctx, isc_mem_t *mctx,
 			       isc_task_t *task, isc_taskaction_t action,
 			       void *arg);
@@ -117,6 +119,7 @@ typedef struct isc__appctx {
 #ifdef ISC_PLATFORM_USETHREADS
 	isc_mutex_t		readylock;
 	isc_condition_t		ready;
+	isc_boolean_t		usethread;
 #endif /* ISC_PLATFORM_USETHREADS */
 } isc__appctx_t;
 
@@ -140,6 +143,8 @@ static struct {
 		isc__appctx_settaskmgr,
 		isc__appctx_setsocketmgr,
 		isc__appctx_settimermgr,
+		isc__appctx_usethread,
+		isc__appctx_setusethread,
 		isc__app_ctxonrun
 	},
 	(void *)isc__app_run,
@@ -980,6 +985,9 @@ isc__appctx_create(isc_mem_t *mctx, isc_appctx_t **ctxp) {
 	ctx->taskmgr = NULL;
 	ctx->socketmgr = NULL;
 	ctx->timermgr = NULL;
+#ifdef ISC_PLATFORM_USETHREADS
+	ctx->usethread = ISC_TRUE;
+#endif
 
 	*ctxp = (isc_appctx_t *)ctx;
 
@@ -1024,6 +1032,34 @@ isc__appctx_settimermgr(isc_appctx_t *ctx0, isc_timermgr_t *timermgr) {
 	REQUIRE(VALID_APPCTX(ctx));
 
 	ctx->timermgr = timermgr;
+}
+
+isc_boolean_t isc__appctx_usethread(isc_appctx_t *ctx0) {
+	isc__appctx_t *ctx = (isc__appctx_t *)ctx0;
+
+	REQUIRE(VALID_APPCTX(ctx));
+
+#ifdef ISC_PLATFORM_USETHREADS
+	return ctx->usethread;
+#else
+	return ISC_FALSE
+#endif
+}
+
+void
+isc__appctx_setusethread(isc_appctx_t *ctx0, isc_boolean_t usethread) {
+	isc__appctx_t *ctx = (isc__appctx_t *)ctx0;
+
+	REQUIRE(VALID_APPCTX(ctx));
+	REQUIRE(ctx->taskmgr == NULL);
+	REQUIRE(ctx->socketmgr == NULL);
+	REQUIRE(ctx->timermgr == NULL);
+
+#ifdef ISC_PLATFORM_USETHREADS
+	ctx->usethread = usethread;
+#else
+	UNUSED(usethread);
+#endif
 }
 
 isc_result_t

@@ -108,6 +108,9 @@ typedef struct isc_appmethods {
 					isc_socketmgr_t *timermgr);
 	void		(*settimermgr)(isc_appctx_t *ctx,
 				       isc_timermgr_t *timermgr);
+	isc_boolean_t	(*usethread)(isc_appctx_t *ctx);
+	void		(*setusethread)(isc_appctx_t *ctx,
+					   isc_boolean_t usethread);
 	isc_result_t 	(*ctxonrun)(isc_appctx_t *ctx, isc_mem_t *mctx,
 				    isc_task_t *task, isc_taskaction_t action,
 				    void *arg);
@@ -352,6 +355,23 @@ isc_appctx_settimermgr(isc_appctx_t *ctx, isc_timermgr_t *timermgr);
  *\li	'ctx' is a valid application context.
  *\li	'timermgr' is a valid timer manager.
  */
+
+isc_boolean_t
+isc_appctx_usethread(isc_appctx_t *ctx);
+
+void
+isc_appctx_setusethread(isc_appctx_t *ctx, isc_boolean_t usethread);
+/*!<
+ * \brief Configure single/multi thread application context.
+ *
+ * This must be done before creation of taskmgr, socketmgr and timermgr.
+ * With 'usethread' true, worker threads are created in each manager.
+ * On false or without thread support they all share current thread.
+ *
+ * Requires:
+ *\li	'ctx' is a valid application context.
+ */
+
 
 /*%<
  * See isc_appctx_create() above.

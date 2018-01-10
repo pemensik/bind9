@@ -171,6 +171,26 @@ isc_appctx_settimermgr(isc_appctx_t *ctx, isc_timermgr_t *timermgr) {
 	ctx->methods->settimermgr(ctx, timermgr);
 }
 
+isc_boolean_t
+isc_appctx_usethread(isc_appctx_t *ctx) {
+	REQUIRE(ISCAPI_APPCTX_VALID(ctx));
+
+	if (isc_bind9)
+		return isc__appctx_usethread(ctx);
+
+	return ctx->methods->usethread(ctx);
+}
+
+void
+isc_appctx_setusethread(isc_appctx_t *ctx, isc_boolean_t usethread) {
+	REQUIRE(ISCAPI_APPCTX_VALID(ctx));
+
+	if (isc_bind9)
+		isc__appctx_setusethread(ctx, usethread);
+
+	ctx->methods->setusethread(ctx, usethread);
+}
+
 isc_result_t
 isc_app_start(void) {
 	if (isc_bind9)
