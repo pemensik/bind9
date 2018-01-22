@@ -360,8 +360,10 @@ t_hashes(IN_ *in, OUT_ *out_sha1, OUT_ *out_sha224)
 	       (FINAL)isc_sha1_final, in, out_sha1);
 	t_sha224(in, out_sha224);
 #ifndef PK11_MD5_DISABLE
-	t_hash("md5", (HASH_INIT)isc_md5_init, (UPDATE)isc_md5_update,
-	       (FINAL)isc_md5_final, in, out_md5);
+	if (isc_md5_available()) {
+		t_hash("md5", (HASH_INIT)isc_md5_init, (UPDATE)isc_md5_update,
+		       (FINAL)isc_md5_final, in, out_md5);
+	}
 #endif
 }
 
@@ -454,9 +456,11 @@ t1(void)
 	/*
 	 * three HMAC-md5 examples from RFC 2104
 	 */
-	t_md5hmac(&rfc2104_1, &rfc2104_1_hmac);
-	t_md5hmac(&rfc2104_2, &rfc2104_2_hmac);
-	t_md5hmac(&rfc2104_3, &rfc2104_3_hmac);
+	if (isc_md5_available()) {
+		t_md5hmac(&rfc2104_1, &rfc2104_1_hmac);
+		t_md5hmac(&rfc2104_2, &rfc2104_2_hmac);
+		t_md5hmac(&rfc2104_3, &rfc2104_3_hmac);
+	}
 #endif
 
 	/*
