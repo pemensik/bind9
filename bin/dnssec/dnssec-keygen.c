@@ -31,6 +31,7 @@
 #include <isc/buffer.h>
 #include <isc/commandline.h>
 #include <isc/entropy.h>
+#include <isc/md5.h>
 #include <isc/mem.h>
 #include <isc/print.h>
 #include <isc/region.h>
@@ -543,7 +544,18 @@ main(int argc, char **argv) {
 			INSIST(freeit == NULL);
 			return (1);
 		} else if (strcasecmp(algname, "HMAC-MD5") == 0) {
-			alg = DST_ALG_HMACMD5;
+			if (isc_md5_available()) {
+				alg = DST_ALG_HMACMD5;
+			} else {
+				fprintf(stderr,
+					"The use of HMAC-MD5 was disabled\n");
+				return (1);
+			}
+		} else if (strcasecmp(algname, "RSAMD5") == 0 &&
+			   isc_md5_available() == ISC_FALSE) {
+			fprintf(stderr, "The use of RSAMD5 was disabled\n");
+			INSIST(freeit == NULL);
+			return (1);
 #else
 			fprintf(stderr,
 				"The use of RSA (RSAMD5) was disabled\n");

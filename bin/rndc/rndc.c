@@ -22,6 +22,7 @@
 #include <isc/file.h>
 #include <isc/log.h>
 #include <isc/net.h>
+#include <isc/md5.h>
 #include <isc/mem.h>
 #include <isc/print.h>
 #include <isc/random.h>
@@ -670,7 +671,7 @@ parse_config(isc_mem_t *mctx, isc_log_t *log, const char *keyname,
 	algorithmstr = cfg_obj_asstring(algorithmobj);
 
 #ifndef PK11_MD5_DISABLE
-	if (strcasecmp(algorithmstr, "hmac-md5") == 0)
+	if (strcasecmp(algorithmstr, "hmac-md5") == 0 && isc_md5_available())
 		algorithm = ISCCC_ALG_HMACMD5;
 	else
 #endif
